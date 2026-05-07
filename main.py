@@ -10,6 +10,7 @@ from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, C
 from aiogram.utils.deep_linking import create_start_link, decode_payload
 from dotenv import load_dotenv
 from requests import *
+from platega import create_platega_transaction, check_platega_status
 import sqlite3
 
 load_dotenv()
@@ -172,6 +173,32 @@ async def send_main_menu(target, user_id, username=None):
 
 
 
+async def poll_transaction(transaction_id: str, tg_id: int, summ: int):
+    import asyncio
+    for _ in range(90):  # 90 * 10s = 15 минут
+        await asyncio.sleep(10)
+        status = await check_platega_status(transaction_id)
+        if status == 'CONFIRMED':
+            await add_balance(tg_id=tg_id, summ=summ)
+            await add_report(money=summ)
+            try:
+                await bot.send_message(
+                    tg_id,
+                    f'✅ Ваш баланс пополнен на <code>{summ}₽</code>!',
+                    parse_mode='HTML',
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_menu_btn()[0]]])
+                )
+            except Exception:
+                pass
+            return
+        elif status in ('CANCELED', 'CHARGEBACKED'):
+            try:
+                await bot.send_message(tg_id, '❌ Платёж отменён.')
+            except Exception:
+                pass
+            return
+
+
 @dp.message(Command('start'))
 async def start_handler(message: Message):
     if not await is_subscribed(message.from_user.id):
@@ -181,11 +208,19 @@ async def start_handler(message: Message):
             parse_mode='HTML'
         )
         return
-    await add_user(message.from_user.id, message.from_user.username)
+    is_new = await add_user(message.from_user.id, message.from_user.username)
     args = message.text.split() if message.text else []
     if len(args) > 1 and args[1].isdigit():
         await set_ref_id(message.from_user.id, int(args[1]))
     await send_main_menu(message, message.from_user.id, message.from_user.username)
+    if is_new:
+        await message.answer(
+            '<b>Добро пожаловать!</b> 👋\n\n'
+            '📍Мы активировали для вас пробный доступ к VPN на <b>3 дня</b>. Спасибо, что выбрали нас!\n\n'
+            'Подключиться очень просто:\n'
+            '<blockquote>Нажмите:<b>"</b><b><tg-emoji emoji-id="5850309953293653168">⚙️</tg-emoji></b><b> Управление подпиской"</b> ниже, чтобы мгновенно получить доступ.</blockquote>',
+            parse_mode='HTML'
+        )
 
 
 
@@ -298,9 +333,6 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
     elif data.startswith('activate_'):
         await callback.answer("Функция в разработке", show_alert=True)
 
-    elif data.endswith('_sbp'):
-        await callback.answer("Функция в разработке", show_alert=True)
-
     elif data == 'devices':
         await callback.answer("Функция в разработке", show_alert=True)
 
@@ -366,8 +398,7 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
         )
         buttons = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text='СБП', callback_data=f'pay_{summ}_sbp', icon_custom_emoji_id='5425008221330880308')],
-            [InlineKeyboardButton(text='Карта', callback_data=f'pay_{summ}_card', icon_custom_emoji_id='5312057711091813718'),
-             InlineKeyboardButton(text='Крипта', callback_data=f'pay_{summ}_crypto', icon_custom_emoji_id='5195308461193182892')],
+            [InlineKeyboardButton(text='Крипта', callback_data=f'pay_{summ}_crypto', icon_custom_emoji_id='5195308461193182892')],
             [back_menu_btn()[0]]
         ])
         await edit_or_answer(callback, text, reply_markup=buttons)
@@ -409,20 +440,33 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
     elif data.startswith('pay_') and not data.startswith('pay_sub_'):
         parts = data.split('_')
         summ, method = int(parts[1]), parts[2]
-        if method == 'crypto':
-            await callback.answer("Оплата криптой в разработке", show_alert=True)
-        elif summ != 0:
-            await state.update_data(summ=summ, method=method)
-            await state.set_state(States.pay_receipt)
-            await edit_or_answer(
-                callback,
-                f"💳 Переведите <b>{summ}₽</b> на карту:\n\n<code>{card}</code>\n\nПосле оплаты отправьте фото чека.",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[back_btn(f'balance_{summ}')])
-            )
-        else:
+        if summ == 0:
             await state.update_data(method=method)
             await state.set_state(States.summ)
             await edit_or_answer(callback, '💳 Введите сумму пополнения:')
+        elif method in ('sbp', 'crypto'):
+            from platega import METHOD_SBP, METHOD_CRYPTO
+            pm = METHOD_SBP if method == 'sbp' else METHOD_CRYPTO
+            method_label = 'СБП' if method == 'sbp' else 'Крипта'
+            method_emoji = '🏦' if method == 'sbp' else '₿'
+            transaction = await create_platega_transaction(summ, user.id, pm)
+            pay_url = transaction.get('url') if transaction else None
+            if pay_url:
+                import asyncio
+                asyncio.create_task(poll_transaction(transaction['transactionId'], user.id, summ))
+                await edit_or_answer(
+                    callback,
+                    f"{method_emoji} Нажмите кнопку ниже для оплаты <b>{summ}₽</b> через <b>{method_label}</b>:\n\n"
+                    f"⏰ Ссылка действительна 15 минут.",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text=f'{method_emoji} Оплатить {summ}₽', url=pay_url)],
+                        [back_btn(f'balance_{summ}')[0]]
+                    ])
+                )
+            else:
+                await callback.answer("❌ Ошибка создания платежа. Попробуйте позже.", show_alert=True)
+        else:
+            await callback.answer("Метод оплаты недоступен.", show_alert=True)
 
         
     elif data in ('referral', 'ref_withdraw'):
@@ -433,16 +477,21 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             else:
                 await callback.answer('Реферальный баланс пуст.', show_alert=True)
         ref_balance, ref_count, ref_procent = await get_ref_info(user.id)
-        ref_procent = ref_procent if ref_procent else REF_PERCENT
         me = await bot.get_me()
         ref_link = f"https://t.me/{me.username}?start={user.id}"
+        if ref_procent > 0:
+            reward_line = (
+                f"<tg-emoji emoji-id=\"5879814368572478751\">🏧</tg-emoji> Реферальный баланс: <code>{ref_balance}</code><b>₽</b>\n"
+                f"<tg-emoji emoji-id=\"5936143551854285132\">📊</tg-emoji> Ваш процент: <code>{ref_procent}%</code>\n\n"
+                f"За каждую оплату реферала вы получаете <code>{ref_procent}%</code> от суммы."
+            )
+        else:
+            reward_line = "🎁 За каждую оплату реферала вы получаете <b>10 дней</b> бесплатной подписки."
         text = (
             f"📍Главное меню » <tg-emoji emoji-id=\"6033125983572201397\">👥</tg-emoji> <b>Реферальная система</b>\n\n"
             f"<blockquote>🔗 Ваша реферальная ссылка:\n<code>{ref_link}</code></blockquote>\n\n"
             f"<tg-emoji emoji-id=\"6033108709213736873\">➕</tg-emoji> Приглашено: <code>{ref_count}</code> чел.\n"
-            f"<tg-emoji emoji-id=\"5879814368572478751\">🏧</tg-emoji> Реферальный баланс: <code>{ref_balance}</code><b>₽</b>\n"
-            f"<tg-emoji emoji-id=\"5936143551854285132\">📊</tg-emoji> Ваш процент: <code>{ref_procent}%</code>\n\n"
-            f"За каждую оплату реферала вы получаете <code>{ref_procent}%</code> от суммы."
+            f"{reward_line}"
         )
         rows = []
         if ref_balance > 0:
@@ -663,12 +712,27 @@ async def summ_handler(message: Message, state: FSMContext):
     summ = int(message.text)
     fsm_data = await state.get_data()
     method = fsm_data['method']
-    await state.update_data(summ=summ)
-    buttons = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text='Оплатить', callback_data=f'pay_{summ}_{method}', style='success')],
-        [back_btn(f'balance_0')[0]]
-    ])
-    await message.answer(text=f'Оплатить {summ}₽', reply_markup=buttons)
+    await state.clear()
+    from platega import METHOD_SBP, METHOD_CRYPTO
+    pm = METHOD_SBP if method == 'sbp' else METHOD_CRYPTO
+    method_label = 'СБП' if method == 'sbp' else 'Крипта'
+    method_emoji = '🏦' if method == 'sbp' else '₿'
+    transaction = await create_platega_transaction(summ, message.from_user.id, pm)
+    pay_url = transaction.get('url') if transaction else None
+    if pay_url:
+        import asyncio
+        asyncio.create_task(poll_transaction(transaction['transactionId'], message.from_user.id, summ))
+        await message.answer(
+            f"{method_emoji} Нажмите кнопку ниже для оплаты <b>{summ}₽</b> через <b>{method_label}</b>:\n\n"
+            f"⏰ Ссылка действительна 15 минут.",
+            parse_mode='HTML',
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=f'{method_emoji} Оплатить {summ}₽', url=pay_url)],
+                [back_menu_btn()[0]]
+            ])
+        )
+    else:
+        await message.answer('❌ Ошибка создания платежа. Попробуйте позже.')
     
 
 @dp.message(States.pay_receipt, F.photo)
