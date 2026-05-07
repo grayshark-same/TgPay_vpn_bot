@@ -52,6 +52,9 @@ async def create_platega_transaction(amount: int, tg_id: int, payment_method: in
                 data = await resp.json()
                 print(f"[Platega] create response {resp.status}: {data}")
                 if resp.status == 200:
+                    # поле может быть url или redirect в зависимости от метода
+                    if 'redirect' in data and not data.get('url'):
+                        data['url'] = data['redirect']
                     return data
     except Exception as e:
         print(f"[Platega] request error: {e}")
