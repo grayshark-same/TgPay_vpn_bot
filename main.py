@@ -448,7 +448,6 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             from platega import METHOD_SBP, METHOD_CRYPTO
             pm = METHOD_SBP if method == 'sbp' else METHOD_CRYPTO
             method_label = 'СБП' if method == 'sbp' else 'Крипта'
-            method_emoji = '🏦' if method == 'sbp' else '₿'
             transaction = await create_platega_transaction(summ, user.id, pm)
             pay_url = transaction.get('url') if transaction else None
             if pay_url:
@@ -459,7 +458,7 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
                     f'<tg-emoji emoji-id="5904359114531675993">💰</tg-emoji> Нажмите кнопку ниже для оплаты <b>{summ}₽</b> через <b>{method_label}</b>:\n\n'
                     f'<tg-emoji emoji-id="5778647930038653243">✨</tg-emoji> Ссылка действительна 15 минут.',
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text=f'{method_emoji} Оплатить {summ}₽', url=pay_url)],
+                        [InlineKeyboardButton(text=f'Оплатить {summ}₽', url=pay_url, icon_custom_emoji_id='5425008221330880308' if method == 'sbp' else '5195308461193182892')],
                         [back_btn(f'balance_{summ}')[0]]
                     ])
                 )
@@ -723,11 +722,11 @@ async def summ_handler(message: Message, state: FSMContext):
         import asyncio
         asyncio.create_task(poll_transaction(transaction['transactionId'], message.from_user.id, summ))
         await message.answer(
-            f"{method_emoji} Нажмите кнопку ниже для оплаты <b>{summ}₽</b> через <b>{method_label}</b>:\n\n"
-            f"⏰ Ссылка действительна 15 минут.",
+            f'<tg-emoji emoji-id="5904359114531675993">💰</tg-emoji> Нажмите кнопку ниже для оплаты <b>{summ}₽</b> через <b>{method_label}</b>:\n\n'
+            f'<tg-emoji emoji-id="5778647930038653243">✨</tg-emoji> Ссылка действительна 15 минут.',
             parse_mode='HTML',
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text=f'{method_emoji} Оплатить {summ}₽', url=pay_url)],
+                [InlineKeyboardButton(text=f'Оплатить {summ}₽', url=pay_url, icon_custom_emoji_id='5425008221330880308' if method == 'sbp' else '5195308461193182892')],
                 [back_menu_btn()[0]]
             ])
         )
