@@ -36,7 +36,7 @@ async def create_platega_transaction(amount: int, tg_id: int, payment_method: in
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                f"{PLATEGA_BASE}/v2/transaction/process",
+                f"{PLATEGA_BASE}/transaction/process",
                 headers={
                     "X-MerchantId": merchant_id,
                     "X-Secret": secret,
@@ -52,8 +52,8 @@ async def create_platega_transaction(amount: int, tg_id: int, payment_method: in
                 data = await resp.json()
                 print(f"[Platega] create response {resp.status}: {data}")
                 if resp.status == 200:
-                    # поле может быть url или redirect в зависимости от метода
-                    if 'redirect' in data and not data.get('url'):
+                    # /transaction/process возвращает redirect, /v2/ возвращает url
+                    if not data.get('url') and data.get('redirect'):
                         data['url'] = data['redirect']
                     return data
     except Exception as e:
