@@ -443,7 +443,7 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
         if summ == 0:
             await state.update_data(method=method)
             await state.set_state(States.summ)
-            await edit_or_answer(callback, '💳 Введите сумму пополнения:')
+            await edit_or_answer(callback, '<tg-emoji emoji-id="5904359114531675993">💰</tg-emoji> Введите сумму пополнения:')
         elif method in ('sbp', 'crypto'):
             from platega import METHOD_SBP, METHOD_CRYPTO
             pm = METHOD_SBP if method == 'sbp' else METHOD_CRYPTO
@@ -456,8 +456,8 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
                 asyncio.create_task(poll_transaction(transaction['transactionId'], user.id, summ))
                 await edit_or_answer(
                     callback,
-                    f"{method_emoji} Нажмите кнопку ниже для оплаты <b>{summ}₽</b> через <b>{method_label}</b>:\n\n"
-                    f"⏰ Ссылка действительна 15 минут.",
+                    f'<tg-emoji emoji-id="5904359114531675993">💰</tg-emoji> Нажмите кнопку ниже для оплаты <b>{summ}₽</b> через <b>{method_label}</b>:\n\n'
+                    f'<tg-emoji emoji-id="5778647930038653243">✨</tg-emoji> Ссылка действительна 15 минут.',
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                         [InlineKeyboardButton(text=f'{method_emoji} Оплатить {summ}₽', url=pay_url)],
                         [back_btn(f'balance_{summ}')[0]]
