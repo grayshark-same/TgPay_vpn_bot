@@ -26,8 +26,8 @@ REF_PERCENT = int(os.getenv('REF_PERCENT', 70))
 DB_DIR = os.getenv('DB_DIR', '.')
 USERS_DB = os.path.join(DB_DIR, 'users.db')
 REPORTS_DB = os.path.join(DB_DIR, 'reports.db')
-   
- 
+
+
 
 with sqlite3.connect(USERS_DB) as db:
     cursor = db.cursor()
@@ -108,11 +108,9 @@ CHANNEL_ID = '@FishVPN_info'
 CHANNEL_URL = 'https://t.me/FishVPN_info'
 
 _sub_required_text = (
-    '<tg-emoji emoji-id="6021418126061605425">📢</tg-emoji> Для использования бота подпишитесь на наш канал..\n\n'
+    '<tg-emoji emoji-id="6021418126061605425">📢</tg-emoji>  Для использования бота подпишитесь на <a href="http://t.me/FishVPN_info">наш канал</a>.\n\n'
     'После подписки нажмите «<b><tg-emoji emoji-id="5774022692642492953">✅</tg-emoji> Я подписался</b>».'
 )
-
-
 _sub_required_markup = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text='Новостной канал', url=CHANNEL_URL, icon_custom_emoji_id='6021418126061605425')],
     [InlineKeyboardButton(text='Я подписался', callback_data='check_sub', icon_custom_emoji_id='5774022692642492953')]
@@ -183,19 +181,11 @@ async def start_handler(message: Message):
             parse_mode='HTML'
         )
         return
-    is_new = await add_user(message.from_user.id, message.from_user.username)
+    await add_user(message.from_user.id, message.from_user.username)
     args = message.text.split() if message.text else []
     if len(args) > 1 and args[1].isdigit():
         await set_ref_id(message.from_user.id, int(args[1]))
     await send_main_menu(message, message.from_user.id, message.from_user.username)
-    if is_new:
-        await message.answer(
-            '<b>Добро пожаловать!</b> 👋\n\n'
-            '📍Мы активировали для вас пробный доступ к VPN на <b>3 дня</b>. Спасибо, что выбрали нас!\n\n'
-            'Подключиться очень просто:\n'
-            '<blockquote>Нажмите:<b>"</b><b><tg-emoji emoji-id="5850309953293653168">⚙️</tg-emoji></b><b> Управление подпиской"</b> ниже, чтобы мгновенно получить доступ.</blockquote>',
-            parse_mode='HTML'
-        )
 
 
 
