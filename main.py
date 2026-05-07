@@ -183,11 +183,19 @@ async def start_handler(message: Message):
             parse_mode='HTML'
         )
         return
-    await add_user(message.from_user.id, message.from_user.username)
+    is_new = await add_user(message.from_user.id, message.from_user.username)
     args = message.text.split() if message.text else []
     if len(args) > 1 and args[1].isdigit():
         await set_ref_id(message.from_user.id, int(args[1]))
     await send_main_menu(message, message.from_user.id, message.from_user.username)
+    if is_new:
+        await message.answer(
+            '<b>Добро пожаловать!</b> 👋\n\n'
+            '📍Мы активировали для вас пробный доступ к VPN на <b>3 дня</b>. Спасибо, что выбрали нас!\n\n'
+            'Подключиться очень просто:\n'
+            '<blockquote>Нажмите:<b>"</b><b><tg-emoji emoji-id="5850309953293653168">⚙️</tg-emoji></b><b> Управление подпиской"</b> ниже, чтобы мгновенно получить доступ.</blockquote>',
+            parse_mode='HTML'
+        )
 
 
 
