@@ -449,7 +449,7 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             pm = METHOD_SBP if method == 'sbp' else METHOD_CRYPTO
             method_label = 'СБП' if method == 'sbp' else 'Крипта'
             transaction = await create_platega_transaction(summ, user.id, pm)
-            pay_url = transaction.get('url') if transaction else None
+            pay_url = (transaction.get('url') or transaction.get('redirect')) if transaction else None
             if pay_url:
                 import asyncio
                 asyncio.create_task(poll_transaction(transaction['transactionId'], user.id, summ))
@@ -717,7 +717,7 @@ async def summ_handler(message: Message, state: FSMContext):
     method_label = 'СБП' if method == 'sbp' else 'Крипта'
     method_emoji = '🏦' if method == 'sbp' else '₿'
     transaction = await create_platega_transaction(summ, message.from_user.id, pm)
-    pay_url = transaction.get('url') if transaction else None
+    pay_url = (transaction.get('url') or transaction.get('redirect')) if transaction else None
     if pay_url:
         import asyncio
         asyncio.create_task(poll_transaction(transaction['transactionId'], message.from_user.id, summ))
