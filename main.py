@@ -184,7 +184,7 @@ async def poll_transaction(transaction_id: str, tg_id: int, summ: int):
             try:
                 await bot.send_message(
                     tg_id,
-                    f'✅ Ваш баланс пополнен на <code>{summ}₽</code>!',
+                    f'<tg-emoji emoji-id="5774022692642492953">✅</tg-emoji> Ваш баланс пополнен на <code>{summ}₽</code>!',
                     parse_mode='HTML',
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_menu_btn()[0]]])
                 )
@@ -569,7 +569,7 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             await add_balance(tg_id=uid,summ=summ)
             # await add_sub(tg_id=uid, summ=summ)
             await add_report(money=summ)
-            await bot.send_message(chat_id=uid, text=f'✅ Ваш баланс пополнен на {summ}!', reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_menu_btn()[0]]]))
+            await bot.send_message(chat_id=uid, text=f'<tg-emoji emoji-id="5774022692642492953">✅</tg-emoji> Ваш баланс пополнен на <code>{summ}₽</code>!', parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_menu_btn()[0]]]))
         elif data.startswith('decline_'):
             uid = int(data.split('_')[1])
             await callback.message.delete()
