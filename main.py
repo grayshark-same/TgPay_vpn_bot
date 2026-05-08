@@ -73,7 +73,8 @@ plan_names = {1: '1 месяц', 3: '3 месяца', 6: '6 месяцев', 12:
 admin_panel = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text='Статистика', callback_data='statistic')],
     [InlineKeyboardButton(text='Баланс пользователя', callback_data='admin_balance')],
-    [InlineKeyboardButton(text='Выгрузить пользователей', callback_data='export_users')],
+    [InlineKeyboardButton(text='👥 Добавить трафера', callback_data='admin_add_trafer')],
+    [InlineKeyboardButton(text='📊 Выгрузить пользователей', callback_data='export_users')],
     [InlineKeyboardButton(text='Рассылка', callback_data='newsletter')]
 ])
 admin_return_button = InlineKeyboardMarkup(inline_keyboard=[
@@ -91,6 +92,8 @@ class States(StatesGroup):
     admin_check_id = State()
     admin_deduct_summ = State()
     admin_deduct_ref_summ = State()
+    admin_trafer_id = State()
+    admin_trafer_procent = State()
 
 # @dp.message(F.photo)
 # async def get_file_id(message: Message):
@@ -582,6 +585,10 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             uid = int(data.split('_')[1])
             await callback.message.delete()
             await bot.send_message(chat_id=uid, text=f'❌ Чек отклонён. Обратитесь в поддержку: @{admin.lstrip("@")}')
+        elif data == 'admin_add_trafer':
+            await state.set_state(States.admin_trafer_id)
+            await callback.message.answer('👤 Введите ID пользователя для назначения трафером:')
+
         elif data == 'admin_balance':
             await state.set_state(States.admin_check_id)
             await callback.message.answer('👤 Введите ID пользователя:')
@@ -884,6 +891,68 @@ async def admin_deduct_ref_summ_handler(message: Message, state: FSMContext):
     )
     try:
         await bot.send_message(uid, f'<tg-emoji emoji-id="6039486778597970865">🔔</tg-emoji> Администратор списал <code>{summ}₽</code> с вашего реферального баланса.', parse_mode='HTML')
+    except Exception:
+        pass
+
+
+@dp.message(States.admin_trafer_id)
+async def admin_trafer_id_handler(message: Message, state: FSMContext):
+    if str(message.from_user.id) not in admins:
+        return
+    if not message.text or not message.text.strip().lstrip('-').isdigit():
+        await message.answer('❌ Введите корректный числовой ID:')
+        return
+    uid = int(message.text.strip())
+    info = await get_user_info(uid)
+    if not info:
+        await message.answer('❌ Пользователь не найден в боте.')
+        await state.clear()
+        return
+    _, username, _, _ = info
+    await state.update_data(trafer_uid=uid, trafer_username=username)
+    await state.set_state(States.admin_trafer_procent)
+    uname_str = f'@{username}' if username else str(uid)
+    await message.answer(
+        f'✅ Пользователь найден: {uname_str}\n\n'
+        f'Введите процент реферального вознаграждения (например: 70):',
+        parse_mode='HTML'
+    )
+
+
+@dp.message(States.admin_trafer_procent)
+async def admin_trafer_procent_handler(message: Message, state: FSMContext):
+    if str(message.from_user.id) not in admins:
+        return
+    if not message.text or not message.text.strip().isdigit():
+        await message.answer('❌ Введите корректное число от 1 до 100:')
+        return
+    procent = int(message.text.strip())
+    if not 1 <= procent <= 100:
+        await message.answer('❌ Процент должен быть от 1 до 100:')
+        return
+    fsm_data = await state.get_data()
+    uid = fsm_data['trafer_uid']
+    username = fsm_data['trafer_username']
+    with sqlite3.connect(USERS_DB) as db:
+        cur = db.cursor()
+        cur.execute("UPDATE users SET ref_procent = ? WHERE tg_id = ?", (procent, uid))
+    await state.clear()
+    uname_str = f'@{username}' if username else str(uid)
+    await message.answer(
+        f'✅ Трафер <b>{uname_str}</b> назначен.\n'
+        f'Реферальный процент: <b>{procent}%</b>',
+        parse_mode='HTML',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text='« В панель', callback_data='admin_return')]
+        ])
+    )
+    try:
+        await bot.send_message(
+            uid,
+            f'🎉 Вам назначен реферальный процент <b>{procent}%</b>.\n'
+            f'Теперь за каждую оплату вашего реферала вы получаете <b>{procent}%</b> на реферальный баланс.',
+            parse_mode='HTML'
+        )
     except Exception:
         pass
 
