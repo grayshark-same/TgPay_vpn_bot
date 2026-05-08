@@ -62,6 +62,28 @@ async def get_users_count():
         cur.execute("SELECT COUNT(*) FROM users")
         return cur.fetchone()[0]
 
+
+async def get_stats(days: int = None) -> tuple:
+    with sqlite3.connect(USERS_DB) as db:
+        cur = db.cursor()
+        if days:
+            since = (datetime.datetime.now() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
+            cur.execute("SELECT COUNT(*) FROM users WHERE date(join_date) >= ?", (since,))
+        else:
+            cur.execute("SELECT COUNT(*) FROM users")
+        users = cur.fetchone()[0]
+    with sqlite3.connect(REPORTS_DB) as db:
+        cur = db.cursor()
+        if days:
+            since = (datetime.datetime.now() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
+            cur.execute("SELECT COALESCE(SUM(transactions),0), COALESCE(SUM(money),0) FROM reports_for_day WHERE date(date) >= ?", (since,))
+        else:
+            cur.execute("SELECT COALESCE(SUM(transactions),0), COALESCE(SUM(money),0) FROM reports_for_day")
+        row = cur.fetchone()
+        transactions = int(row[0]) if row else 0
+        money = float(row[1]) if row else 0.0
+    return users, transactions, money
+
 async def add_report(money: int):
     today = datetime.date.today().isoformat()
     with sqlite3.connect(REPORTS_DB) as db:

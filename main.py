@@ -539,8 +539,25 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
         )
 
     elif str(user.id) in admins:
-        if data == 'statistic':
-            await callback.message.edit_text('statistic', reply_markup=admin_return_button)
+        if data == 'statistic' or data.startswith('stat_'):
+            period = data.replace('stat_', '') if data.startswith('stat_') else 'all'
+            period_days = {'day': 1, 'week': 7, 'month': 30, 'all': None}
+            period_names = {'day': '1 день', 'week': 'Неделя', 'month': 'Месяц', 'all': 'Всё время'}
+            users, transactions, money = await get_stats(period_days[period])
+            def _btn(label, cb):
+                return InlineKeyboardButton(text=f'• {label}' if cb == f'stat_{period}' else label, callback_data=cb)
+            stat_text = (
+                f'📊 <b>Статистика за {period_names[period].lower()}</b>\n\n'
+                f'👥 Всего пользователей: <b>{users}</b>\n'
+                f'🛒 Всего покупок: <b>{transactions}</b>\n'
+                f'💰 Общая прибыль: <b>{money:.2f} ₽</b>'
+            )
+            stat_markup = InlineKeyboardMarkup(inline_keyboard=[
+                [_btn('1 день', 'stat_day'), _btn('Неделя', 'stat_week')],
+                [_btn('Месяц', 'stat_month'), _btn('Всё время', 'stat_all')],
+                [InlineKeyboardButton(text='◀ Назад', callback_data='admin_return')]
+            ])
+            await callback.message.edit_text(stat_text, reply_markup=stat_markup, parse_mode='HTML')
         elif data == 'admin_return':
             count = await get_users_count()
             total_profit = 0
