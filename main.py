@@ -73,8 +73,8 @@ plan_names = {1: '1 месяц', 3: '3 месяца', 6: '6 месяцев', 12:
 admin_panel = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text='Статистика', callback_data='statistic')],
     [InlineKeyboardButton(text='Баланс пользователя', callback_data='admin_balance')],
-    [InlineKeyboardButton(text='👥 Добавить трафера', callback_data='admin_add_trafer')],
-    [InlineKeyboardButton(text='📊 Выгрузить пользователей', callback_data='export_users')],
+    [InlineKeyboardButton(text='Добавить трафера', callback_data='admin_add_trafer')],
+    [InlineKeyboardButton(text='Выгрузить пользователей', callback_data='export_users')],
     [InlineKeyboardButton(text='Рассылка', callback_data='newsletter')]
 ])
 admin_return_button = InlineKeyboardMarkup(inline_keyboard=[
