@@ -73,7 +73,7 @@ plan_names = {1: '1 месяц', 3: '3 месяца', 6: '6 месяцев', 12:
 admin_panel = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text='Статистика', callback_data='statistic')],
     [InlineKeyboardButton(text='Баланс пользователя', callback_data='admin_balance')],
-    [InlineKeyboardButton(text='📊 Выгрузить пользователей', callback_data='export_users')],
+    [InlineKeyboardButton(text='Выгрузить пользователей', callback_data='export_users')],
     [InlineKeyboardButton(text='Рассылка', callback_data='newsletter')]
 ])
 admin_return_button = InlineKeyboardMarkup(inline_keyboard=[
@@ -246,7 +246,7 @@ async def admin_command(message: Message):
             f'<tg-emoji emoji-id="5890848474563352982">🪙</tg-emoji>Всего заработано: <code>{total_profit:.2f}₽</code> / <code>${total_profit/USD_RATE:.2f}</code>\n'
             f'<tg-emoji emoji-id="5902206159095339799">🤑</tg-emoji>Прибыль сегодня: <code>{today_profit:.2f}₽</code> / <code>${today_profit/USD_RATE:.2f}</code>\n\n'
             f'<tg-emoji emoji-id="6032594876506312598">👥</tg-emoji>Всего юзеров: <b>{count}</b>\n'
-            f'🛒 Покупок всего: <b>{total_purchases}</b> | сегодня: <b>{today_purchases}</b>',
+            f'<tg-emoji emoji-id="5902206159095339799">🤑</tg-emoji> Покупок всего: <b>{total_purchases}</b> | сегодня: <b>{today_purchases}</b>',
             reply_markup=admin_panel, parse_mode='HTML'
         )
     
@@ -562,7 +562,7 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
                 f'<tg-emoji emoji-id="5890848474563352982">🪙</tg-emoji>Всего заработано: <code>{total_profit:.2f}₽</code> / <code>${total_profit/USD_RATE:.2f}</code>\n'
                 f'<tg-emoji emoji-id="5902206159095339799">🤑</tg-emoji>Прибыль сегодня: <code>{today_profit:.2f}₽</code> / <code>${today_profit/USD_RATE:.2f}</code>\n\n'
                 f'<tg-emoji emoji-id="6032594876506312598">👥</tg-emoji>Всего юзеров: <b>{count}</b>\n'
-                f'🛒 Покупок всего: <b>{total_purchases}</b> | сегодня: <b>{today_purchases}</b>',
+                f'<tg-emoji emoji-id="5902206159095339799">🤑</tg-emoji> Покупок всего: <b>{total_purchases}</b> | сегодня: <b>{today_purchases}</b>',
                 reply_markup=admin_panel,
                 parse_mode='HTML'
             )
