@@ -23,6 +23,7 @@ admins = os.getenv('ADMINS').split(', ')
 admin = os.getenv('ADMIN')
 card = os.getenv('CARD')
 REF_PERCENT = int(os.getenv('REF_PERCENT', 70))
+USD_RATE = float(os.getenv('USD_RATE', 90))
 
 DB_DIR = os.getenv('DB_DIR', '.')
 USERS_DB = os.path.join(DB_DIR, 'users.db')
@@ -72,6 +73,7 @@ plan_names = {1: '1 месяц', 3: '3 месяца', 6: '6 месяцев', 12:
 admin_panel = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text='Статистика', callback_data='statistic')],
     [InlineKeyboardButton(text='Баланс пользователя', callback_data='admin_balance')],
+    [InlineKeyboardButton(text='📊 Выгрузить пользователей', callback_data='export_users')],
     [InlineKeyboardButton(text='Рассылка', callback_data='newsletter')]
 ])
 admin_return_button = InlineKeyboardMarkup(inline_keyboard=[
@@ -237,22 +239,16 @@ async def restart_handler(message: Message):
 @dp.message(Command('admin'))
 async def admin_command(message: Message):
     if str(message.from_user.id) in admins:
-        count = await get_users_count()
-        total_profit = 0
-        todays_purchases = 0
-        todays_profit = 0
-        bot_balance = 0
+        count, total_purchases, total_profit = await get_stats()
+        _, today_purchases, today_profit = await get_stats(days=1)
         await message.answer(
-            f'''---------ADMIN_PANEL---------
-            
-<tg-emoji emoji-id="5258204546391351475">💰</tg-emoji><b>Баланс бота</b>: <code>{bot_balance}</code>
-<tg-emoji emoji-id="5890848474563352982">🪙</tg-emoji>Всего заработано: <code>{total_profit}</code>
-
-<tg-emoji emoji-id="6032594876506312598">👥</tg-emoji>Всего юзеров: {count}
-<tg-emoji emoji-id="5902206159095339799">🤑</tg-emoji>Прибыль сегодня: <code>{todays_profit}</code>
-            ''',
-            reply_markup=admin_panel, parse_mode='html'
-        ),
+            f'---------ADMIN_PANEL---------\n\n'
+            f'<tg-emoji emoji-id="5890848474563352982">🪙</tg-emoji>Всего заработано: <code>{total_profit:.2f}₽</code> / <code>${total_profit/USD_RATE:.2f}</code>\n'
+            f'<tg-emoji emoji-id="5902206159095339799">🤑</tg-emoji>Прибыль сегодня: <code>{today_profit:.2f}₽</code> / <code>${today_profit/USD_RATE:.2f}</code>\n\n'
+            f'<tg-emoji emoji-id="6032594876506312598">👥</tg-emoji>Всего юзеров: <b>{count}</b>\n'
+            f'🛒 Покупок всего: <b>{total_purchases}</b> | сегодня: <b>{today_purchases}</b>',
+            reply_markup=admin_panel, parse_mode='HTML'
+        )
     
 
 
@@ -559,19 +555,14 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             ])
             await callback.message.edit_text(stat_text, reply_markup=stat_markup, parse_mode='HTML')
         elif data == 'admin_return':
-            count = await get_users_count()
-            total_profit = 0
-            todays_purchases = 0
-            todays_profit = 0
-            bot_balance = 0
+            count, total_purchases, total_profit = await get_stats()
+            _, today_purchases, today_profit = await get_stats(days=1)
             await callback.message.edit_text(
-                f'''---------ADMIN_PANEL---------
-
-<tg-emoji emoji-id="5258204546391351475">💰</tg-emoji><b>Баланс бота</b>: <code>{bot_balance}</code>
-<tg-emoji emoji-id="5890848474563352982">🪙</tg-emoji>Всего заработано: <code>{total_profit}</code>
-
-<tg-emoji emoji-id="6032594876506312598">👥</tg-emoji>Всего юзеров: {count}
-<tg-emoji emoji-id="5902206159095339799">🤑</tg-emoji>Прибыль сегодня: <code>{todays_profit}</code>''',
+                f'---------ADMIN_PANEL---------\n\n'
+                f'<tg-emoji emoji-id="5890848474563352982">🪙</tg-emoji>Всего заработано: <code>{total_profit:.2f}₽</code> / <code>${total_profit/USD_RATE:.2f}</code>\n'
+                f'<tg-emoji emoji-id="5902206159095339799">🤑</tg-emoji>Прибыль сегодня: <code>{today_profit:.2f}₽</code> / <code>${today_profit/USD_RATE:.2f}</code>\n\n'
+                f'<tg-emoji emoji-id="6032594876506312598">👥</tg-emoji>Всего юзеров: <b>{count}</b>\n'
+                f'🛒 Покупок всего: <b>{total_purchases}</b> | сегодня: <b>{today_purchases}</b>',
                 reply_markup=admin_panel,
                 parse_mode='HTML'
             )
@@ -616,6 +607,28 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
                     f'💰 Основной баланс: <code>{balance}₽</code>\n\nВведите сумму для списания:',
                     parse_mode='HTML'
                 )
+
+        elif data == 'export_users':
+            import openpyxl, io
+            with sqlite3.connect(USERS_DB) as db:
+                cur = db.cursor()
+                cur.execute("SELECT tg_id, username, balance, ref_balance, end_of_sub, join_date, ref_id, ref_procent FROM users")
+                rows = cur.fetchall()
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = 'Пользователи'
+            ws.append(['ID', 'Username', 'Баланс', 'Реф. баланс', 'Подписка до', 'Дата регистрации', 'Реф. ID', 'Реф. %'])
+            for row in rows:
+                ws.append(list(row))
+            buf = io.BytesIO()
+            wb.save(buf)
+            buf.seek(0)
+            from aiogram.types import BufferedInputFile
+            await callback.message.answer_document(
+                BufferedInputFile(buf.read(), filename='users.xlsx'),
+                caption=f'👥 Всего пользователей: {len(rows)}'
+            )
+            await callback.answer()
 
         elif data == 'newsletter':
             await state.set_state(States.newsletter_text)
