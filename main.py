@@ -11,6 +11,12 @@ from aiogram.utils.deep_linking import create_start_link, decode_payload
 from dotenv import load_dotenv
 from requests import *
 from platega import create_platega_transaction, check_platega_status
+from vpn import (
+    ensure_vpn_account,
+    get_happ_activation_url,
+    init_vpn_db,
+    start_subscription_server,
+)
 import sqlite3
 
 load_dotenv()
@@ -64,6 +70,7 @@ with sqlite3.connect(REPORTS_DB) as db:
                         transactions INTEGER,
                         users INTEGER
                    )''')
+init_vpn_db()
 
 bot_balance = 0
 plans = {1: 199, 3: 499, 6: 899, 12: 1499}
@@ -325,18 +332,51 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
         rows = []
         if download_url:
             rows.append([InlineKeyboardButton(text='📥 Скачать приложение', url=download_url)])
-        rows.append([InlineKeyboardButton(text='🔗 Активировать VPN-профиль', callback_data=f'activate_{platform}')])
+        is_active, end_date = await get_user_sub(user.id)
+        if is_active and end_date:
+            try:
+                await ensure_vpn_account(user.id, end_date)
+                rows.append([InlineKeyboardButton(text='🔗 Активировать VPN-профиль', url=get_happ_activation_url(user.id))])
+            except Exception as e:
+                print(f'[vpn sync ERROR] {type(e).__name__}: {e}')
+                rows.append([InlineKeyboardButton(text='🔗 Активировать VPN-профиль', callback_data='activate_error')])
+        else:
+            rows.append([InlineKeyboardButton(text='🔗 Активировать VPN-профиль', callback_data='activate_no_sub')])
         rows.append([back_btn('connect')[0]])
         await edit_or_answer(callback, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
+    elif data == 'activate_no_sub':
+        await callback.answer("Сначала продлите подписку.", show_alert=True)
+
+    elif data == 'activate_error':
+        await callback.answer("Не удалось подготовить подписку. Напишите в поддержку.", show_alert=True)
+
     elif data.startswith('activate_'):
-        await callback.answer("Функция в разработке", show_alert=True)
+        await callback.answer("Откройте раздел подключения и нажмите кнопку автонастройки.", show_alert=True)
 
     elif data == 'devices':
-        await callback.answer("Функция в разработке", show_alert=True)
+        await callback.answer("Лимит: 3 устройства. Список активных устройств добавим отдельно.", show_alert=True)
 
     elif data == 'universal_link':
-        await callback.answer("Функция в разработке", show_alert=True)
+        is_active, end_date = await get_user_sub(user.id)
+        if not is_active or not end_date:
+            await callback.answer("Сначала продлите подписку.", show_alert=True)
+            return
+        try:
+            sub_url = await ensure_vpn_account(user.id, end_date)
+        except Exception as e:
+            print(f'[vpn sync ERROR] {type(e).__name__}: {e}')
+            await callback.answer("Не удалось подготовить подписку. Напишите в поддержку.", show_alert=True)
+            return
+        text = (
+            "📋 <b>Универсальная ссылка</b>\n\n"
+            f"<code>{sub_url}</code>\n\n"
+            "Эта ссылка содержит все доступные серверы и действует до конца подписки."
+        )
+        await edit_or_answer(callback, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text='🔗 Активировать в Happ', url=get_happ_activation_url(user.id))],
+            [back_btn('settings')[0]]
+        ]))
 
     elif data == 'extend':
         _, end_date = await get_user_sub(user.id)
@@ -408,6 +448,12 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
         if summ <= await get_user_balance(user.id):
             await add_balance(summ=-summ, tg_id=user.id)
             await add_sub(tg_id=user.id, plan=plan)
+            _, end_date = await get_user_sub(user.id)
+            if end_date:
+                try:
+                    await ensure_vpn_account(user.id, end_date)
+                except Exception as e:
+                    print(f'[vpn sync ERROR] {type(e).__name__}: {e}')
             ref_id = await get_ref_id(user.id)
             if ref_id:
                 *_, ref_procent = await get_ref_info(ref_id)
@@ -955,6 +1001,13 @@ async def admin_trafer_procent_handler(message: Message, state: FSMContext):
         )
     except Exception:
         pass
+
+
+async def on_startup(*args, **kwargs):
+    await start_subscription_server()
+
+
+dp.startup.register(on_startup)
 
 
 if __name__ == '__main__':
