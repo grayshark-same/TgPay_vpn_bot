@@ -335,8 +335,8 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
         is_active, end_date = await get_user_sub(user.id)
         if is_active and end_date:
             try:
-                await ensure_vpn_account(user.id, end_date)
-                rows.append([InlineKeyboardButton(text='🔗 Активировать VPN-профиль', url=get_happ_activation_url(user.id))])
+                await ensure_vpn_account(user.id, end_date, user.username)
+                rows.append([InlineKeyboardButton(text='🔗 Активировать VPN-профиль', url=get_happ_activation_url(user.id, user.username))])
             except Exception as e:
                 print(f'[vpn sync ERROR] {type(e).__name__}: {e}')
                 rows.append([InlineKeyboardButton(text='🔗 Активировать VPN-профиль', callback_data='activate_error')])
@@ -363,7 +363,7 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             await callback.answer("Сначала продлите подписку.", show_alert=True)
             return
         try:
-            sub_url = await ensure_vpn_account(user.id, end_date)
+            sub_url = await ensure_vpn_account(user.id, end_date, user.username)
         except Exception as e:
             print(f'[vpn sync ERROR] {type(e).__name__}: {e}')
             await callback.answer("Не удалось подготовить подписку. Напишите в поддержку.", show_alert=True)
@@ -374,7 +374,7 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             "Эта ссылка содержит все доступные серверы и действует до конца подписки."
         )
         await edit_or_answer(callback, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text='🔗 Активировать в Happ', url=get_happ_activation_url(user.id))],
+            [InlineKeyboardButton(text='🔗 Активировать в Happ', url=get_happ_activation_url(user.id, user.username))],
             [back_btn('settings')[0]]
         ]))
 
@@ -451,7 +451,7 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             _, end_date = await get_user_sub(user.id)
             if end_date:
                 try:
-                    await ensure_vpn_account(user.id, end_date)
+                    await ensure_vpn_account(user.id, end_date, user.username)
                 except Exception as e:
                     print(f'[vpn sync ERROR] {type(e).__name__}: {e}')
             ref_id = await get_ref_id(user.id)

@@ -7,15 +7,17 @@ from main import REPORTS_DB, USERS_DB
 import datetime
 
 
-async def add_user(tg_id: int, username: str) -> bool:
+async def add_user(tg_id: int, username: str | None) -> bool:
     with sqlite3.connect(USERS_DB) as db:
         cur = db.cursor()
-        cur.execute("SELECT * FROM users WHERE tg_id = ?", (tg_id,))
+        cur.execute("SELECT username FROM users WHERE tg_id = ?", (tg_id,))
         user = cur.fetchone()
         if not user:
             end_date = (datetime.datetime.now() + datetime.timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
             cur.execute("INSERT INTO users (tg_id, username, end_of_sub) VALUES(?, ?, ?)", (tg_id, username, end_date))
             return True
+        if user[0] != username:
+            cur.execute("UPDATE users SET username = ? WHERE tg_id = ?", (username, tg_id))
         return False
 
 async def add_sub(tg_id: int, plan: int):
