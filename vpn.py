@@ -4,6 +4,7 @@ import json
 import os
 import secrets
 import sqlite3
+import uuid as _uuid
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, urlencode, urlsplit, urlunsplit
@@ -42,6 +43,8 @@ class XuiNode:
     flow: str
     spider_x: str
     path: str
+    flag: str
+    fixed_uuid: str
 
 
 def _bool_env(name: str, default: bool = False) -> bool:
@@ -92,6 +95,8 @@ def _load_nodes() -> list[XuiNode]:
                 flow=os.getenv(prefix + "FLOW", os.getenv("VPN_FLOW", "xtls-rprx-vision")).strip(),
                 spider_x=os.getenv(prefix + "SPIDER_X", "/").strip(),
                 path=os.getenv(prefix + "PATH", "/").strip(),
+                flag=os.getenv(prefix + "FLAG", "").strip(),
+                fixed_uuid=os.getenv(prefix + "FIXED_UUID", "").strip(),
             )
         )
     return nodes
@@ -139,15 +144,22 @@ def _get_stored_username(tg_id: int) -> str | None:
     return row[0] if row and row[0] else None
 
 
+_FISHVPN_NS = _uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+
+
 def _vpn_identity(tg_id: int, username: str | None = None) -> dict[str, str]:
     return {
-        "uuid": str(tg_id),
+        "uuid": str(_uuid.uuid5(_FISHVPN_NS, str(tg_id))),
         "email": _normalize_tg_username(tg_id, username),
     }
 
 
 def _first_short_id(short_ids: str) -> str:
     return next((short_id.strip() for short_id in short_ids.split(",") if short_id.strip()), "")
+
+
+def _resolve_uuid(node: "XuiNode", account: dict[str, str]) -> str:
+    return node.fixed_uuid if node.fixed_uuid else account["uuid"]
 
 
 def _get_or_create_account(tg_id: int, username: str | None = None) -> dict[str, str]:
@@ -236,10 +248,29 @@ def get_subscription_url(tg_id: int, username: str | None = None) -> str:
     return f"{PUBLIC_SUB_URL}/sub/{account['sub_token']}"
 
 
-def get_happ_activation_url(tg_id: int, username: str | None = None) -> str:
+async def _get_crypt5_url(sub_url: str) -> str:
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://crypto.happ.su/api-v2.php",
+                json={"url": sub_url},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json(content_type=None)
+                    print(f"[crypt5] API response: {data}")
+                    for field in ("link", "url", "href", "result", "encrypted"):
+                        link = data.get(field, "")
+                        if isinstance(link, str) and link.startswith("happ://"):
+                            return link
+    except Exception as e:
+        print(f"[crypt5] {e}")
+    return f"happ://add/{sub_url}"
+
+
+async def get_happ_activation_url(tg_id: int, username: str | None = None) -> str:
     sub_url = get_subscription_url(tg_id, username)
-    encoded_sub_url = quote(base64.b64encode(sub_url.encode()).decode(), safe="")
-    happ_url = f"happ://crypt3/{encoded_sub_url}"
+    happ_url = await _get_crypt5_url(sub_url)
     return f"{PUBLIC_SUB_URL}/redirect?to={quote(happ_url, safe='')}"
 
 
@@ -299,7 +330,7 @@ class XuiClient:
         async with session.request(method, url, ssl=self.verify_ssl, **kwargs) as resp:
             text = await resp.text()
             if resp.status >= 400:
-                raise RuntimeError(f"{self.node.name}: {resp.status} {text[:300]}")
+                raise RuntimeError(f"{self.node.name}: {resp.status} {method} {url} — {text[:300]}")
             if not text:
                 return {}
             try:
@@ -309,9 +340,13 @@ class XuiClient:
 
     async def _login(self, session: aiohttp.ClientSession) -> None:
         payload = {"username": self.node.username, "password": self.node.password}
-        data = await self._request(session, "POST", "/login", json=payload)
-        if data.get("success") is False:
-            data = await self._request(session, "POST", "/login", data=payload)
+        try:
+            data = await self._request(session, "POST", "/login", json=payload)
+            if data.get("success") is not False:
+                return
+        except RuntimeError:
+            pass
+        data = await self._request(session, "POST", "/login", data=payload)
         if data.get("success") is False:
             raise RuntimeError(f"{self.node.name}: login failed: {data.get('msg')}")
 
@@ -358,14 +393,13 @@ async def ensure_vpn_account(tg_id: int, end_date: datetime.datetime, username: 
         node_account = _get_or_create_node_account(tg_id, node, username)
         if node.panel_url and node.username and node.password and node.inbound_id:
             await XuiClient(node).sync_client(tg_id, node_account, end_date)
-        elif not _build_node_link(node, node_account):
+        elif not _build_node_link(node, node_account) and not _build_node_json_config(node, node_account):
             raise RuntimeError(f"{node.name}: 3x-ui panel is not configured and direct link fields are incomplete")
     return get_subscription_url(tg_id, username)
 
 
 def _build_node_link(node: XuiNode, account: dict[str, str]) -> str | None:
-    short_id = _first_short_id(node.short_id)
-    if not node.host or not node.port or not node.public_key or not short_id:
+    if not node.host or not node.port:
         return None
 
     params = {
@@ -374,6 +408,9 @@ def _build_node_link(node: XuiNode, account: dict[str, str]) -> str | None:
         "security": node.security,
     }
     if node.security == "reality":
+        short_id = _first_short_id(node.short_id)
+        if not node.public_key or not short_id:
+            return None
         params.update(
             {
                 "pbk": node.public_key,
@@ -386,12 +423,139 @@ def _build_node_link(node: XuiNode, account: dict[str, str]) -> str | None:
             params["flow"] = node.flow
         if node.network == "tcp" and node.spider_x:
             params["spx"] = node.spider_x
-    if node.network in ("xhttp", "splithttp") and node.path:
+    elif node.security == "tls":
+        params.update({"fp": node.fingerprint, "sni": node.sni})
+        if node.flow:
+            params["flow"] = node.flow
+
+    if node.network in ("ws", "websocket"):
+        if node.path:
+            params["path"] = node.path
+        if node.sni:
+            params["host"] = node.sni
+    elif node.network in ("xhttp", "splithttp") and node.path:
         params["path"] = node.path
 
     query = urlencode({k: v for k, v in params.items() if v}, quote_via=quote)
-    label = quote(node.profile_name, safe="")
-    return f"vless://{account['uuid']}@{node.host}:{node.port}?{query}#{label}"
+    display_name = f"{node.flag} {node.profile_name}" if node.flag else node.profile_name
+    label = quote(display_name, safe="")
+    return f"vless://{_resolve_uuid(node, account)}@{node.host}:{node.port}?{query}#{label}"
+
+
+def _build_node_json_config(node: XuiNode, account: dict[str, str]) -> dict | None:
+    if not node.host or not node.port:
+        return None
+    if node.security == "reality" and not node.public_key:
+        return None
+    short_id = _first_short_id(node.short_id)
+    display_name = f"{node.flag} {node.profile_name}" if node.flag else node.profile_name
+    proxy: dict[str, Any] = {
+        "protocol": "vless",
+        "tag": "proxy",
+        "settings": {
+            "vnext": [
+                {
+                    "address": node.host,
+                    "port": node.port,
+                    "users": [
+                        {
+                            "id": _resolve_uuid(node, account),
+                            "flow": node.flow or "",
+                            "encryption": "none",
+                            "level": 0,
+                        }
+                    ],
+                }
+            ]
+        },
+        "streamSettings": {
+            "network": node.network or "tcp",
+            "security": node.security or "none",
+        },
+    }
+    if node.security == "reality":
+        proxy["streamSettings"]["realitySettings"] = {
+            "serverName": node.sni,
+            "fingerprint": node.fingerprint or "chrome",
+            "publicKey": node.public_key,
+            "shortId": short_id,
+            "spiderX": node.spider_x or "/",
+        }
+    elif node.security == "tls":
+        proxy["streamSettings"]["tlsSettings"] = {
+            "serverName": node.sni,
+            "allowInsecure": False,
+            "fingerprint": node.fingerprint or "chrome",
+            "alpn": ["http/1.1"],
+        }
+    net = node.network or "tcp"
+    if net in ("ws", "websocket"):
+        ws: dict[str, Any] = {"path": node.path or "/"}
+        if node.sni:
+            ws["headers"] = {"Host": node.sni}
+        proxy["streamSettings"]["wsSettings"] = ws
+    elif net in ("xhttp", "splithttp"):
+        proxy["streamSettings"]["xhttpSettings"] = {"path": node.path or "/"}
+    return {
+        "remarks": display_name,
+        "log": {"loglevel": "warning"},
+        "dns": {
+            "queryStrategy": "UseIP",
+            "servers": ["1.1.1.1", "1.0.0.1", "8.8.8.8"],
+        },
+        "inbounds": [
+            {
+                "listen": "127.0.0.1",
+                "port": 10808,
+                "protocol": "socks",
+                "settings": {"auth": "noauth", "udp": True},
+                "sniffing": {
+                    "destOverride": ["http", "tls", "quic"],
+                    "enabled": True,
+                    "routeOnly": False,
+                },
+                "tag": "socks",
+            },
+            {
+                "listen": "127.0.0.1",
+                "port": 10809,
+                "protocol": "http",
+                "settings": {"allowTransparent": False},
+                "sniffing": {
+                    "destOverride": ["http", "tls", "quic"],
+                    "enabled": True,
+                    "routeOnly": False,
+                },
+                "tag": "http",
+            },
+        ],
+        "outbounds": [
+            proxy,
+            {"protocol": "freedom", "tag": "direct"},
+            {"protocol": "blackhole", "tag": "block"},
+        ],
+        "routing": {
+            "domainMatcher": "hybrid",
+            "domainStrategy": "IPIfNonMatch",
+            "rules": [
+                {"outboundTag": "direct", "protocol": ["bittorrent"], "type": "field"},
+            ],
+        },
+    }
+
+
+async def build_json_subscription(token: str) -> list[dict] | None:
+    active, tg_id = _user_is_active_by_token(token)
+    if not active or tg_id is None:
+        return None
+    nodes = _load_nodes()
+    configs: list[dict] = []
+    for node in nodes:
+        account = _get_or_create_node_account(tg_id, node)
+        cfg = _build_node_json_config(node, account)
+        if cfg:
+            configs.append(cfg)
+    return configs if configs else None
 
 
 def _decode_subscription(text: str) -> list[str]:
@@ -440,16 +604,55 @@ async def build_merged_subscription(token: str) -> str:
     return base64.b64encode("\n".join(deduped_links).encode()).decode()
 
 
+def _get_sub_info_by_token(token: str) -> dict | None:
+    with sqlite3.connect(USERS_DB) as db:
+        cur = db.cursor()
+        cur.execute(
+            """
+            SELECT users.end_of_sub, users.username
+            FROM vpn_accounts
+            JOIN users ON users.tg_id = vpn_accounts.tg_id
+            WHERE vpn_accounts.sub_token = ?
+            """,
+            (token,),
+        )
+        row = cur.fetchone()
+    if not row:
+        return None
+    return {"end_of_sub": row[0], "username": row[1]}
+
+
 async def handle_subscription(request: web.Request) -> web.Response:
-    body = await build_merged_subscription(request.match_info["token"])
-    return web.Response(text=body, content_type="text/plain")
+    token = request.match_info["token"]
+    headers: dict[str, str] = {}
+    info = _get_sub_info_by_token(token)
+    if info:
+        username = (info["username"] or "").strip() or "User"
+        headers["profile-title"] = f"FishVPN 🎣 | {username[:20]}"
+        headers["profile-update-interval"] = "6"
+        headers["support-url"] = os.getenv("SUPPORT_URL", "https://t.me/FishVPN_info")
+        if info["end_of_sub"]:
+            try:
+                expire = int(
+                    datetime.datetime.strptime(info["end_of_sub"], "%Y-%m-%d %H:%M:%S").timestamp()
+                )
+                headers["subscription-userinfo"] = f"upload=0; download=0; total=0; expire={expire}"
+            except Exception:
+                pass
+    json_configs = await build_json_subscription(token)
+    if json_configs is not None:
+        body = json.dumps(json_configs, ensure_ascii=False)
+        return web.Response(text=body, content_type="application/json", headers=headers)
+    body = await build_merged_subscription(token)
+    return web.Response(text=body, content_type="text/plain", headers=headers)
 
 
 async def handle_redirect(request: web.Request) -> web.Response:
     target = request.query.get("to", "")
     if not target.startswith("happ://"):
         return web.Response(status=400, text="bad redirect")
-    raise web.HTTPFound(target)
+    html = f"<script>window.location.href='{target}';</script>"
+    return web.Response(text=html, content_type="text/html")
 
 
 async def handle_health(_: web.Request) -> web.Response:

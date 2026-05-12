@@ -14,6 +14,7 @@ from platega import create_platega_transaction, check_platega_status
 from vpn import (
     ensure_vpn_account,
     get_happ_activation_url,
+    get_subscription_url,
     init_vpn_db,
     start_subscription_server,
 )
@@ -53,10 +54,11 @@ with sqlite3.connect(USERS_DB) as db:
         )
     ''')
     for _col, _def in [
-        ('devices',     'INTEGER DEFAULT 0'),
-        ('ref_id',      'INTEGER DEFAULT 0'),
-        ('ref_balance', 'INTEGER DEFAULT 0'),
-        ('ref_procent', 'INTEGER DEFAULT 0'),
+        ('devices',          'INTEGER DEFAULT 0'),
+        ('ref_id',           'INTEGER DEFAULT 0'),
+        ('ref_balance',      'INTEGER DEFAULT 0'),
+        ('ref_procent',      'INTEGER DEFAULT 0'),
+        ('notified_expiry',  'TIMESTAMP'),
     ]:
         try:
             cursor.execute(f"ALTER TABLE users ADD COLUMN {_col} {_def}")
@@ -81,6 +83,7 @@ admin_panel = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text='Статистика', callback_data='statistic')],
     [InlineKeyboardButton(text='Баланс пользователя', callback_data='admin_balance')],
     [InlineKeyboardButton(text='Добавить трафера', callback_data='admin_add_trafer')],
+    [InlineKeyboardButton(text='Выдать подписку', callback_data='admin_give_sub')],
     [InlineKeyboardButton(text='Выгрузить пользователей', callback_data='export_users')],
     [InlineKeyboardButton(text='Рассылка', callback_data='newsletter')]
 ])
@@ -101,6 +104,7 @@ class States(StatesGroup):
     admin_deduct_ref_summ = State()
     admin_trafer_id = State()
     admin_trafer_procent = State()
+    admin_give_sub_id = State()
 
 # @dp.message(F.photo)
 # async def get_file_id(message: Message):
@@ -323,20 +327,30 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             'macos':   ('💻 MacOS',   'https://apps.apple.com/us/app/happ-proxy-utility/id6504287215'),
         }
         name, download_url = info[platform]
+        is_active, end_date = await get_user_sub(user.id)
+        sub_url = None
+        if is_active and end_date:
+            try:
+                await ensure_vpn_account(user.id, end_date, user.username)
+                await upsert_device(user.id, platform)
+                sub_url = get_subscription_url(user.id, user.username)
+            except Exception as e:
+                print(f'[vpn sync ERROR] {type(e).__name__}: {e}')
+
+        sub_line = f"\n\n🔗 Ссылка для вставки в Happ:\n<code>{sub_url}</code>" if (platform == 'windows' and sub_url) else ""
         text = (
             f"📍Главное меню » <tg-emoji emoji-id='6032742198179532882'>⚙️</tg-emoji> Управление подпиской » 🔗 Подключиться к VPN » <b>{name}</b>\n\n"
             "1. Нажмите «📥 Скачать приложение» и установите программу.\n\n"
             "2. Нажмите «🔗 Активировать VPN-профиль», чтобы добавить подключение.\n\n"
-            "3. Готово! Выберите локацию и подключитесь!"
+            f"3. Готово! Выберите локацию и подключитесь!{sub_line}"
         )
         rows = []
         if download_url:
             rows.append([InlineKeyboardButton(text='📥 Скачать приложение', url=download_url)])
-        is_active, end_date = await get_user_sub(user.id)
-        if is_active and end_date:
+        if sub_url:
             try:
-                await ensure_vpn_account(user.id, end_date, user.username)
-                rows.append([InlineKeyboardButton(text='🔗 Активировать VPN-профиль', url=get_happ_activation_url(user.id, user.username))])
+                happ_url = await get_happ_activation_url(user.id, user.username)
+                rows.append([InlineKeyboardButton(text='🔗 Активировать VPN-профиль', url=happ_url)])
             except Exception as e:
                 print(f'[vpn sync ERROR] {type(e).__name__}: {e}')
                 rows.append([InlineKeyboardButton(text='🔗 Активировать VPN-профиль', callback_data='activate_error')])
@@ -354,8 +368,36 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
     elif data.startswith('activate_'):
         await callback.answer("Откройте раздел подключения и нажмите кнопку автонастройки.", show_alert=True)
 
-    elif data == 'devices':
-        await callback.answer("Лимит: 3 устройства. Список активных устройств добавим отдельно.", show_alert=True)
+    elif data == 'devices' or data.startswith('device_remove_'):
+        if data.startswith('device_remove_'):
+            dev_id = int(data.split('_')[2])
+            await remove_device(dev_id, user.id)
+            await callback.answer("✅ Устройство удалено.")
+        devices = await get_user_devices(user.id)
+        _icons = {'android': '🤖', 'ios': '🍏', 'windows': '🖥', 'macos': '💻'}
+        if devices:
+            lines = []
+            for i, (_, platform, label, added_at) in enumerate(devices, 1):
+                icon = _icons.get(platform, '📱')
+                try:
+                    date_str = datetime.datetime.strptime(added_at, "%Y-%m-%d %H:%M:%S").strftime("%d.%m.%Y")
+                except Exception:
+                    date_str = "—"
+                lines.append(f"{i}. {icon} {label} — {date_str}")
+            body = "\n".join(lines)
+        else:
+            body = "Нет подключённых устройств.\n\nАктивируйте VPN через раздел «🔗 Подключиться к VPN»."
+        text = (
+            "📍Главное меню » ⚙️ Управление подпиской » <b>📱 Мои устройства</b>\n\n"
+            f"{body}\n\n"
+            f"<blockquote>Подключено: {len(devices)}/3</blockquote>"
+        )
+        rows = [
+            [InlineKeyboardButton(text=f'🗑 Удалить {_icons.get(p, "📱")} {lbl}', callback_data=f'device_remove_{did}')]
+            for did, p, lbl, _ in devices
+        ]
+        rows.append([back_btn('settings')[0]])
+        await edit_or_answer(callback, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
     elif data == 'universal_link':
         is_active, end_date = await get_user_sub(user.id)
@@ -373,8 +415,9 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             f"<code>{sub_url}</code>\n\n"
             "Эта ссылка содержит все доступные серверы и действует до конца подписки."
         )
+        happ_url = await get_happ_activation_url(user.id, user.username)
         await edit_or_answer(callback, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text='🔗 Активировать в Happ', url=get_happ_activation_url(user.id, user.username))],
+            [InlineKeyboardButton(text='🔗 Активировать в Happ', url=happ_url)],
             [back_btn('settings')[0]]
         ]))
 
@@ -631,6 +674,39 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             uid = int(data.split('_')[1])
             await callback.message.delete()
             await bot.send_message(chat_id=uid, text=f'❌ Чек отклонён. Обратитесь в поддержку: @{admin.lstrip("@")}')
+        elif data == 'admin_give_sub':
+            await state.set_state(States.admin_give_sub_id)
+            await callback.message.answer('👤 Введите ID пользователя для выдачи подписки:')
+
+        elif data.startswith('admin_give_plan_'):
+            parts = data.split('_')
+            plan, uid = int(parts[3]), int(parts[4])
+            await add_sub(tg_id=uid, plan=plan)
+            _, end_date = await get_user_sub(uid)
+            if end_date:
+                try:
+                    info = await get_user_info(uid)
+                    await ensure_vpn_account(uid, end_date, info[1] if info else None)
+                except Exception as e:
+                    print(f'[vpn sync ERROR] {type(e).__name__}: {e}')
+            date_str = end_date.strftime('%d.%m.%Y') if end_date else '—'
+            await callback.message.edit_text(
+                f'✅ Подписка <b>{plan_names[plan]}</b> выдана пользователю <code>{uid}</code>\n'
+                f'📅 Активна до: <code>{date_str}</code>',
+                parse_mode='HTML',
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='« В панель', callback_data='admin_return')]])
+            )
+            try:
+                await bot.send_message(
+                    uid,
+                    f'🎁 Администратор выдал вам подписку на <b>{plan_names[plan]}</b>!\n'
+                    f'📅 Активна до: <code>{date_str}</code>',
+                    parse_mode='HTML',
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_menu_btn()[0]]])
+                )
+            except Exception:
+                pass
+
         elif data == 'admin_add_trafer':
             await state.set_state(States.admin_trafer_id)
             await callback.message.answer('👤 Введите ID пользователя для назначения трафером:')
@@ -663,23 +739,38 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
 
         elif data == 'export_users':
             import openpyxl, io
-            with sqlite3.connect(USERS_DB) as db:
-                cur = db.cursor()
-                cur.execute("SELECT tg_id, username, balance, ref_balance, end_of_sub, join_date, ref_id, ref_procent FROM users")
-                rows = cur.fetchall()
+            from aiogram.types import BufferedInputFile
             wb = openpyxl.Workbook()
-            ws = wb.active
-            ws.title = 'Пользователи'
-            ws.append(['ID', 'Username', 'Баланс', 'Реф. баланс', 'Подписка до', 'Дата регистрации', 'Реф. ID', 'Реф. %'])
-            for row in rows:
-                ws.append(list(row))
+
+            def _dump_table(db_path, table, sheet_name, ws=None):
+                with sqlite3.connect(db_path) as db:
+                    cur = db.cursor()
+                    cur.execute(f"SELECT * FROM {table}")
+                    cols = [d[0] for d in cur.description]
+                    rows = cur.fetchall()
+                sheet = ws if ws else wb.create_sheet(sheet_name)
+                sheet.title = sheet_name
+                sheet.append(cols)
+                for row in rows:
+                    sheet.append(list(row))
+                return len(rows)
+
+            first = wb.active
+            n_users      = _dump_table(USERS_DB,   'users',             'Пользователи', ws=first)
+            _dump_table(USERS_DB,   'vpn_accounts',      'VPN аккаунты')
+            _dump_table(USERS_DB,   'vpn_node_accounts', 'Node аккаунты')
+            try:
+                _dump_table(USERS_DB, 'vpn_devices', 'Устройства')
+            except Exception:
+                pass
+            _dump_table(REPORTS_DB, 'reports_for_day',   'Отчёты по дням')
+
             buf = io.BytesIO()
             wb.save(buf)
             buf.seek(0)
-            from aiogram.types import BufferedInputFile
             await callback.message.answer_document(
-                BufferedInputFile(buf.read(), filename='users.xlsx'),
-                caption=f'👥 Всего пользователей: {len(rows)}'
+                BufferedInputFile(buf.read(), filename='fishvpn_db.xlsx'),
+                caption=f'📊 Выгрузка БД\n👥 Пользователей: {n_users}'
             )
             await callback.answer()
 
@@ -1003,8 +1094,110 @@ async def admin_trafer_procent_handler(message: Message, state: FSMContext):
         pass
 
 
+@dp.message(States.admin_give_sub_id)
+async def admin_give_sub_id_handler(message: Message, state: FSMContext):
+    if str(message.from_user.id) not in admins:
+        return
+    if not message.text or not message.text.strip().lstrip('-').isdigit():
+        await message.answer('❌ Введите корректный числовой ID:')
+        return
+    uid = int(message.text.strip())
+    info = await get_user_info(uid)
+    if not info:
+        await message.answer('❌ Пользователь не найден.')
+        await state.clear()
+        return
+    await state.clear()
+    _, username, _, _ = info
+    is_active, end_date = await get_user_sub(uid)
+    uname_str = f'@{username}' if username else str(uid)
+    status = 'активна ✅' if is_active else 'не активна ❌'
+    date_str = end_date.strftime('%d.%m.%Y') if end_date else '—'
+    text = (
+        f'👤 Пользователь: {uname_str}\n'
+        f'🆔 ID: <code>{uid}</code>\n'
+        f'📅 Подписка: {status} (до {date_str})\n\n'
+        f'Выберите тариф для выдачи:'
+    )
+    buttons = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='1 месяц (30 дней)', callback_data=f'admin_give_plan_1_{uid}')],
+        [InlineKeyboardButton(text='3 месяца (90 дней)', callback_data=f'admin_give_plan_3_{uid}')],
+        [InlineKeyboardButton(text='6 месяцев (180 дней)', callback_data=f'admin_give_plan_6_{uid}')],
+        [InlineKeyboardButton(text='12 месяцев (360 дней)', callback_data=f'admin_give_plan_12_{uid}')],
+        [InlineKeyboardButton(text='« В панель', callback_data='admin_return')]
+    ])
+    await message.answer(text, reply_markup=buttons, parse_mode='HTML')
+
+
+async def check_expiring_subscriptions():
+    now = datetime.datetime.now()
+    window_start = now + datetime.timedelta(hours=23)
+    window_end = now + datetime.timedelta(hours=25)
+    with sqlite3.connect(USERS_DB) as db:
+        cur = db.cursor()
+        cur.execute(
+            "SELECT tg_id, username, end_of_sub FROM users "
+            "WHERE end_of_sub IS NOT NULL "
+            "AND (notified_expiry IS NULL OR notified_expiry != end_of_sub)"
+        )
+        candidates = cur.fetchall()
+    notified = []
+    for tg_id, username, end_of_sub_str in candidates:
+        try:
+            end_date = datetime.datetime.strptime(end_of_sub_str, "%Y-%m-%d %H:%M:%S")
+        except (ValueError, TypeError):
+            continue
+        if window_start <= end_date <= window_end:
+            delta = end_date - now
+            total_minutes = int(delta.total_seconds() // 60)
+            hours_left = total_minutes // 60
+            minutes_left = total_minutes % 60
+            user_str = f'@{username}' if username else f'ID {tg_id}'
+            text = (
+                f'Уважаемый пользователь {user_str}!\n\n'
+                f'<b><tg-emoji emoji-id="5420323339723881652">⚠️</tg-emoji></b>'
+                f'<b>Ваш индивидуальный или пробный тариф скоро закончится.</b> \n\n'
+                f'<tg-emoji emoji-id="5444856076954520455">🧾</tg-emoji>'
+                f'Ваша подписка истекает через: \n'
+                f'<b>{hours_left} часов {minutes_left} минут.</b> \n\n'
+                f'Чтобы продлить, нажмите на кнопку ниже.'
+            )
+            try:
+                await bot.send_message(
+                    tg_id,
+                    text,
+                    parse_mode='HTML',
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text='Продлить подписку', callback_data='extend')]
+                    ])
+                )
+                notified.append((end_of_sub_str, tg_id))
+            except Exception as e:
+                print(f'[expiry reminder] send failed to {tg_id}: {e}')
+    if notified:
+        with sqlite3.connect(USERS_DB) as db:
+            cur = db.cursor()
+            for end_of_sub_str, tg_id in notified:
+                cur.execute(
+                    "UPDATE users SET notified_expiry = ? WHERE tg_id = ?",
+                    (end_of_sub_str, tg_id)
+                )
+
+
+async def expiry_reminder_loop():
+    import asyncio
+    while True:
+        await asyncio.sleep(3600)
+        try:
+            await check_expiring_subscriptions()
+        except Exception as e:
+            print(f'[expiry reminder loop ERROR] {type(e).__name__}: {e}')
+
+
 async def on_startup(*args, **kwargs):
+    import asyncio
     await start_subscription_server()
+    asyncio.create_task(expiry_reminder_loop())
 
 
 dp.startup.register(on_startup)
