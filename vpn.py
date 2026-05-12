@@ -430,6 +430,7 @@ def _build_node_json_outbound(node: XuiNode, account: dict[str, str]) -> dict | 
     outbound: dict[str, Any] = {
         "protocol": "vless",
         "tag": display_name,
+        "remarks": display_name,
         "settings": {
             "vnext": [
                 {
