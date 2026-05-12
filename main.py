@@ -53,10 +53,11 @@ with sqlite3.connect(USERS_DB) as db:
         )
     ''')
     for _col, _def in [
-        ('devices',     'INTEGER DEFAULT 0'),
-        ('ref_id',      'INTEGER DEFAULT 0'),
-        ('ref_balance', 'INTEGER DEFAULT 0'),
-        ('ref_procent', 'INTEGER DEFAULT 0'),
+        ('devices',          'INTEGER DEFAULT 0'),
+        ('ref_id',           'INTEGER DEFAULT 0'),
+        ('ref_balance',      'INTEGER DEFAULT 0'),
+        ('ref_procent',      'INTEGER DEFAULT 0'),
+        ('notified_expiry',  'TIMESTAMP'),
     ]:
         try:
             cursor.execute(f"ALTER TABLE users ADD COLUMN {_col} {_def}")
@@ -1119,8 +1120,75 @@ async def admin_give_sub_id_handler(message: Message, state: FSMContext):
     await message.answer(text, reply_markup=buttons, parse_mode='HTML')
 
 
+async def check_expiring_subscriptions():
+    now = datetime.datetime.now()
+    window_start = now + datetime.timedelta(hours=23)
+    window_end = now + datetime.timedelta(hours=25)
+    with sqlite3.connect(USERS_DB) as db:
+        cur = db.cursor()
+        cur.execute(
+            "SELECT tg_id, username, end_of_sub FROM users "
+            "WHERE end_of_sub IS NOT NULL "
+            "AND (notified_expiry IS NULL OR notified_expiry != end_of_sub)"
+        )
+        candidates = cur.fetchall()
+    notified = []
+    for tg_id, username, end_of_sub_str in candidates:
+        try:
+            end_date = datetime.datetime.strptime(end_of_sub_str, "%Y-%m-%d %H:%M:%S")
+        except (ValueError, TypeError):
+            continue
+        if window_start <= end_date <= window_end:
+            delta = end_date - now
+            total_minutes = int(delta.total_seconds() // 60)
+            hours_left = total_minutes // 60
+            minutes_left = total_minutes % 60
+            user_str = f'@{username}' if username else f'ID {tg_id}'
+            text = (
+                f'Уважаемый пользователь {user_str}!\n\n'
+                f'<b><tg-emoji emoji-id="5420323339723881652">⚠️</tg-emoji></b>'
+                f'<b>Ваш индивидуальный или пробный тариф скоро закончится.</b> \n\n'
+                f'<tg-emoji emoji-id="5444856076954520455">🧾</tg-emoji>'
+                f'Ваша подписка истекает через: \n'
+                f'<b>{hours_left} часов {minutes_left} минут.</b> \n\n'
+                f'Чтобы продлить, нажмите на кнопку ниже.'
+            )
+            try:
+                await bot.send_message(
+                    tg_id,
+                    text,
+                    parse_mode='HTML',
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text='Продлить подписку', callback_data='extend')]
+                    ])
+                )
+                notified.append((end_of_sub_str, tg_id))
+            except Exception as e:
+                print(f'[expiry reminder] send failed to {tg_id}: {e}')
+    if notified:
+        with sqlite3.connect(USERS_DB) as db:
+            cur = db.cursor()
+            for end_of_sub_str, tg_id in notified:
+                cur.execute(
+                    "UPDATE users SET notified_expiry = ? WHERE tg_id = ?",
+                    (end_of_sub_str, tg_id)
+                )
+
+
+async def expiry_reminder_loop():
+    import asyncio
+    while True:
+        await asyncio.sleep(3600)
+        try:
+            await check_expiring_subscriptions()
+        except Exception as e:
+            print(f'[expiry reminder loop ERROR] {type(e).__name__}: {e}')
+
+
 async def on_startup(*args, **kwargs):
+    import asyncio
     await start_subscription_server()
+    asyncio.create_task(expiry_reminder_loop())
 
 
 dp.startup.register(on_startup)
