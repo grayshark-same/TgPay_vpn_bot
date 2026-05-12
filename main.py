@@ -348,12 +348,15 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
         if download_url:
             rows.append([InlineKeyboardButton(text='📥 Скачать приложение', url=download_url)])
         if sub_url:
-            try:
-                happ_url = await get_happ_activation_url(user.id, user.username)
-                rows.append([InlineKeyboardButton(text='🔗 Активировать VPN-профиль', url=happ_url)])
-            except Exception as e:
-                print(f'[vpn sync ERROR] {type(e).__name__}: {e}')
-                rows.append([InlineKeyboardButton(text='🔗 Активировать VPN-профиль', callback_data='activate_error')])
+            if platform == 'windows':
+                rows.append([InlineKeyboardButton(text='🔗 Активировать VPN-профиль', url=sub_url)])
+            else:
+                try:
+                    happ_url = await get_happ_activation_url(user.id, user.username)
+                    rows.append([InlineKeyboardButton(text='🔗 Активировать VPN-профиль', url=happ_url)])
+                except Exception as e:
+                    print(f'[vpn sync ERROR] {type(e).__name__}: {e}')
+                    rows.append([InlineKeyboardButton(text='🔗 Активировать VPN-профиль', callback_data='activate_error')])
         else:
             rows.append([InlineKeyboardButton(text='🔗 Активировать VPN-профиль', callback_data='activate_no_sub')])
         rows.append([back_btn('connect')[0]])
