@@ -81,6 +81,7 @@ admin_panel = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text='Статистика', callback_data='statistic')],
     [InlineKeyboardButton(text='Баланс пользователя', callback_data='admin_balance')],
     [InlineKeyboardButton(text='Добавить трафера', callback_data='admin_add_trafer')],
+    [InlineKeyboardButton(text='Выдать подписку', callback_data='admin_give_sub')],
     [InlineKeyboardButton(text='Выгрузить пользователей', callback_data='export_users')],
     [InlineKeyboardButton(text='Рассылка', callback_data='newsletter')]
 ])
@@ -101,6 +102,7 @@ class States(StatesGroup):
     admin_deduct_ref_summ = State()
     admin_trafer_id = State()
     admin_trafer_procent = State()
+    admin_give_sub_id = State()
 
 # @dp.message(F.photo)
 # async def get_file_id(message: Message):
@@ -631,6 +633,39 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             uid = int(data.split('_')[1])
             await callback.message.delete()
             await bot.send_message(chat_id=uid, text=f'❌ Чек отклонён. Обратитесь в поддержку: @{admin.lstrip("@")}')
+        elif data == 'admin_give_sub':
+            await state.set_state(States.admin_give_sub_id)
+            await callback.message.answer('👤 Введите ID пользователя для выдачи подписки:')
+
+        elif data.startswith('admin_give_plan_'):
+            parts = data.split('_')
+            plan, uid = int(parts[3]), int(parts[4])
+            await add_sub(tg_id=uid, plan=plan)
+            _, end_date = await get_user_sub(uid)
+            if end_date:
+                try:
+                    info = await get_user_info(uid)
+                    await ensure_vpn_account(uid, end_date, info[1] if info else None)
+                except Exception as e:
+                    print(f'[vpn sync ERROR] {type(e).__name__}: {e}')
+            date_str = end_date.strftime('%d.%m.%Y') if end_date else '—'
+            await callback.message.edit_text(
+                f'✅ Подписка <b>{plan_names[plan]}</b> выдана пользователю <code>{uid}</code>\n'
+                f'📅 Активна до: <code>{date_str}</code>',
+                parse_mode='HTML',
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='« В панель', callback_data='admin_return')]])
+            )
+            try:
+                await bot.send_message(
+                    uid,
+                    f'🎁 Администратор выдал вам подписку на <b>{plan_names[plan]}</b>!\n'
+                    f'📅 Активна до: <code>{date_str}</code>',
+                    parse_mode='HTML',
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_menu_btn()[0]]])
+                )
+            except Exception:
+                pass
+
         elif data == 'admin_add_trafer':
             await state.set_state(States.admin_trafer_id)
             await callback.message.answer('👤 Введите ID пользователя для назначения трафером:')
@@ -1001,6 +1036,41 @@ async def admin_trafer_procent_handler(message: Message, state: FSMContext):
         )
     except Exception:
         pass
+
+
+@dp.message(States.admin_give_sub_id)
+async def admin_give_sub_id_handler(message: Message, state: FSMContext):
+    if str(message.from_user.id) not in admins:
+        return
+    if not message.text or not message.text.strip().lstrip('-').isdigit():
+        await message.answer('❌ Введите корректный числовой ID:')
+        return
+    uid = int(message.text.strip())
+    info = await get_user_info(uid)
+    if not info:
+        await message.answer('❌ Пользователь не найден.')
+        await state.clear()
+        return
+    await state.clear()
+    _, username, _, _ = info
+    is_active, end_date = await get_user_sub(uid)
+    uname_str = f'@{username}' if username else str(uid)
+    status = 'активна ✅' if is_active else 'не активна ❌'
+    date_str = end_date.strftime('%d.%m.%Y') if end_date else '—'
+    text = (
+        f'👤 Пользователь: {uname_str}\n'
+        f'🆔 ID: <code>{uid}</code>\n'
+        f'📅 Подписка: {status} (до {date_str})\n\n'
+        f'Выберите тариф для выдачи:'
+    )
+    buttons = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='1 месяц (30 дней)', callback_data=f'admin_give_plan_1_{uid}')],
+        [InlineKeyboardButton(text='3 месяца (90 дней)', callback_data=f'admin_give_plan_3_{uid}')],
+        [InlineKeyboardButton(text='6 месяцев (180 дней)', callback_data=f'admin_give_plan_6_{uid}')],
+        [InlineKeyboardButton(text='12 месяцев (360 дней)', callback_data=f'admin_give_plan_12_{uid}')],
+        [InlineKeyboardButton(text='« В панель', callback_data='admin_return')]
+    ])
+    await message.answer(text, reply_markup=buttons, parse_mode='HTML')
 
 
 async def on_startup(*args, **kwargs):
