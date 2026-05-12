@@ -10,6 +10,7 @@ from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, C
 from aiogram.utils.deep_linking import create_start_link, decode_payload
 from dotenv import load_dotenv
 from requests import *
+from requests import get_user_devices, upsert_device, remove_device
 from platega import create_platega_transaction, check_platega_status
 from vpn import (
     ensure_vpn_account,
@@ -338,6 +339,7 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
         if is_active and end_date:
             try:
                 await ensure_vpn_account(user.id, end_date, user.username)
+                await upsert_device(user.id, platform)
                 happ_url = await get_happ_activation_url(user.id, user.username)
                 rows.append([InlineKeyboardButton(text='🔗 Активировать VPN-профиль', url=happ_url)])
             except Exception as e:
@@ -357,8 +359,36 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
     elif data.startswith('activate_'):
         await callback.answer("Откройте раздел подключения и нажмите кнопку автонастройки.", show_alert=True)
 
-    elif data == 'devices':
-        await callback.answer("Лимит: 3 устройства. Список активных устройств добавим отдельно.", show_alert=True)
+    elif data == 'devices' or data.startswith('device_remove_'):
+        if data.startswith('device_remove_'):
+            dev_id = int(data.split('_')[2])
+            await remove_device(dev_id, user.id)
+            await callback.answer("✅ Устройство удалено.")
+        devices = await get_user_devices(user.id)
+        _icons = {'android': '🤖', 'ios': '🍏', 'windows': '🖥', 'macos': '💻'}
+        if devices:
+            lines = []
+            for i, (_, platform, label, added_at) in enumerate(devices, 1):
+                icon = _icons.get(platform, '📱')
+                try:
+                    date_str = datetime.datetime.strptime(added_at, "%Y-%m-%d %H:%M:%S").strftime("%d.%m.%Y")
+                except Exception:
+                    date_str = "—"
+                lines.append(f"{i}. {icon} {label} — {date_str}")
+            body = "\n".join(lines)
+        else:
+            body = "Нет подключённых устройств.\n\nАктивируйте VPN через раздел «🔗 Подключиться к VPN»."
+        text = (
+            "📍Главное меню » ⚙️ Управление подпиской » <b>📱 Мои устройства</b>\n\n"
+            f"{body}\n\n"
+            f"<blockquote>Подключено: {len(devices)}/3</blockquote>"
+        )
+        rows = [
+            [InlineKeyboardButton(text=f'🗑 Удалить {_icons.get(p, "📱")} {lbl}', callback_data=f'device_remove_{did}')]
+            for did, p, lbl, _ in devices
+        ]
+        rows.append([back_btn('settings')[0]])
+        await edit_or_answer(callback, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
     elif data == 'universal_link':
         is_active, end_date = await get_user_sub(user.id)

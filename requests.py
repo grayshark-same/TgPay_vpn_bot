@@ -178,3 +178,45 @@ async def deduct_ref_balance(tg_id: int, amount: int):
     with sqlite3.connect(USERS_DB) as db:
         cur = db.cursor()
         cur.execute("UPDATE users SET ref_balance = ref_balance - ? WHERE tg_id = ?", (amount, tg_id))
+
+
+def _init_devices_table():
+    with sqlite3.connect(USERS_DB) as db:
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS vpn_devices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tg_id INTEGER NOT NULL,
+                platform TEXT NOT NULL,
+                label TEXT NOT NULL,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(tg_id, platform)
+            )
+        """)
+
+
+async def get_user_devices(tg_id: int) -> list:
+    _init_devices_table()
+    with sqlite3.connect(USERS_DB) as db:
+        cur = db.cursor()
+        cur.execute(
+            "SELECT id, platform, label, added_at FROM vpn_devices WHERE tg_id = ? ORDER BY added_at",
+            (tg_id,),
+        )
+        return cur.fetchall()
+
+
+async def upsert_device(tg_id: int, platform: str) -> None:
+    _init_devices_table()
+    labels = {'android': 'Android', 'ios': 'iOS', 'windows': 'Windows', 'macos': 'macOS'}
+    label = labels.get(platform, platform.capitalize())
+    with sqlite3.connect(USERS_DB) as db:
+        db.execute(
+            "INSERT OR IGNORE INTO vpn_devices (tg_id, platform, label) VALUES (?, ?, ?)",
+            (tg_id, platform, label),
+        )
+
+
+async def remove_device(device_id: int, tg_id: int) -> None:
+    _init_devices_table()
+    with sqlite3.connect(USERS_DB) as db:
+        db.execute("DELETE FROM vpn_devices WHERE id = ? AND tg_id = ?", (device_id, tg_id))
