@@ -10,7 +10,6 @@ from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, C
 from aiogram.utils.deep_linking import create_start_link, decode_payload
 from dotenv import load_dotenv
 from requests import *
-from requests import get_user_devices, upsert_device, remove_device
 from platega import create_platega_transaction, check_platega_status
 from vpn import (
     ensure_vpn_account,
