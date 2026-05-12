@@ -729,23 +729,38 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
 
         elif data == 'export_users':
             import openpyxl, io
-            with sqlite3.connect(USERS_DB) as db:
-                cur = db.cursor()
-                cur.execute("SELECT tg_id, username, balance, ref_balance, end_of_sub, join_date, ref_id, ref_procent FROM users")
-                rows = cur.fetchall()
+            from aiogram.types import BufferedInputFile
             wb = openpyxl.Workbook()
-            ws = wb.active
-            ws.title = 'Пользователи'
-            ws.append(['ID', 'Username', 'Баланс', 'Реф. баланс', 'Подписка до', 'Дата регистрации', 'Реф. ID', 'Реф. %'])
-            for row in rows:
-                ws.append(list(row))
+
+            def _dump_table(db_path, table, sheet_name, ws=None):
+                with sqlite3.connect(db_path) as db:
+                    cur = db.cursor()
+                    cur.execute(f"SELECT * FROM {table}")
+                    cols = [d[0] for d in cur.description]
+                    rows = cur.fetchall()
+                sheet = ws if ws else wb.create_sheet(sheet_name)
+                sheet.title = sheet_name
+                sheet.append(cols)
+                for row in rows:
+                    sheet.append(list(row))
+                return len(rows)
+
+            first = wb.active
+            n_users      = _dump_table(USERS_DB,   'users',             'Пользователи', ws=first)
+            _dump_table(USERS_DB,   'vpn_accounts',      'VPN аккаунты')
+            _dump_table(USERS_DB,   'vpn_node_accounts', 'Node аккаунты')
+            try:
+                _dump_table(USERS_DB, 'vpn_devices', 'Устройства')
+            except Exception:
+                pass
+            _dump_table(REPORTS_DB, 'reports_for_day',   'Отчёты по дням')
+
             buf = io.BytesIO()
             wb.save(buf)
             buf.seek(0)
-            from aiogram.types import BufferedInputFile
             await callback.message.answer_document(
-                BufferedInputFile(buf.read(), filename='users.xlsx'),
-                caption=f'👥 Всего пользователей: {len(rows)}'
+                BufferedInputFile(buf.read(), filename='fishvpn_db.xlsx'),
+                caption=f'📊 Выгрузка БД\n👥 Пользователей: {n_users}'
             )
             await callback.answer()
 
