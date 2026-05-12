@@ -419,6 +419,70 @@ def _build_node_link(node: XuiNode, account: dict[str, str]) -> str | None:
     return f"vless://{account['uuid']}@{node.host}:{node.port}?{query}#{label}"
 
 
+def _build_node_json_outbound(node: XuiNode, account: dict[str, str]) -> dict | None:
+    if not node.host or not node.port or not node.public_key:
+        return None
+    short_id = _first_short_id(node.short_id)
+    outbound: dict[str, Any] = {
+        "protocol": "vless",
+        "tag": node.profile_name,
+        "settings": {
+            "vnext": [
+                {
+                    "address": node.host,
+                    "port": node.port,
+                    "users": [
+                        {
+                            "id": account["uuid"],
+                            "flow": node.flow or "",
+                            "encryption": "none",
+                            "level": 0,
+                        }
+                    ],
+                }
+            ]
+        },
+        "streamSettings": {
+            "network": node.network or "tcp",
+            "security": node.security or "none",
+        },
+    }
+    if node.security == "reality":
+        outbound["streamSettings"]["realitySettings"] = {
+            "serverName": node.sni,
+            "fingerprint": node.fingerprint or "chrome",
+            "publicKey": node.public_key,
+            "shortId": short_id,
+            "spiderX": node.spider_x or "/",
+        }
+    elif node.security == "tls":
+        outbound["streamSettings"]["tlsSettings"] = {
+            "serverName": node.sni,
+            "allowInsecure": False,
+            "fingerprint": node.fingerprint or "chrome",
+        }
+    net = node.network or "tcp"
+    if net in ("ws", "websocket"):
+        outbound["streamSettings"]["wsSettings"] = {"path": node.path or "/"}
+    elif net in ("xhttp", "splithttp"):
+        outbound["streamSettings"]["xhttpSettings"] = {"path": node.path or "/"}
+    return outbound
+
+
+async def build_json_subscription(token: str) -> list[dict] | None:
+    active, tg_id = _user_is_active_by_token(token)
+    if not active or tg_id is None:
+        return None
+    nodes = _load_nodes()
+    outbounds: list[dict] = []
+    for node in nodes:
+        account = _get_or_create_node_account(tg_id, node)
+        ob = _build_node_json_outbound(node, account)
+        if ob:
+            outbounds.append(ob)
+    return outbounds if outbounds else None
+
+
 def _decode_subscription(text: str) -> list[str]:
     text = text.strip()
     if not text:
@@ -485,7 +549,6 @@ def _get_sub_info_by_token(token: str) -> dict | None:
 
 async def handle_subscription(request: web.Request) -> web.Response:
     token = request.match_info["token"]
-    body = await build_merged_subscription(token)
     headers: dict[str, str] = {}
     info = _get_sub_info_by_token(token)
     if info:
@@ -501,6 +564,11 @@ async def handle_subscription(request: web.Request) -> web.Response:
                 headers["subscription-userinfo"] = f"upload=0; download=0; total=0; expire={expire}"
             except Exception:
                 pass
+    json_outbounds = await build_json_subscription(token)
+    if json_outbounds is not None:
+        body = json.dumps({"outbounds": json_outbounds}, ensure_ascii=False)
+        return web.Response(text=body, content_type="application/json", headers=headers)
+    body = await build_merged_subscription(token)
     return web.Response(text=body, content_type="text/plain", headers=headers)
 
 
