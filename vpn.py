@@ -391,14 +391,13 @@ async def ensure_vpn_account(tg_id: int, end_date: datetime.datetime, username: 
         node_account = _get_or_create_node_account(tg_id, node, username)
         if node.panel_url and node.username and node.password and node.inbound_id:
             await XuiClient(node).sync_client(tg_id, node_account, end_date)
-        elif not _build_node_link(node, node_account):
+        elif not _build_node_link(node, node_account) and not _build_node_json_config(node, node_account):
             raise RuntimeError(f"{node.name}: 3x-ui panel is not configured and direct link fields are incomplete")
     return get_subscription_url(tg_id, username)
 
 
 def _build_node_link(node: XuiNode, account: dict[str, str]) -> str | None:
-    short_id = _first_short_id(node.short_id)
-    if not node.host or not node.port or not node.public_key or not short_id:
+    if not node.host or not node.port:
         return None
 
     params = {
@@ -407,6 +406,9 @@ def _build_node_link(node: XuiNode, account: dict[str, str]) -> str | None:
         "security": node.security,
     }
     if node.security == "reality":
+        short_id = _first_short_id(node.short_id)
+        if not node.public_key or not short_id:
+            return None
         params.update(
             {
                 "pbk": node.public_key,
@@ -419,7 +421,17 @@ def _build_node_link(node: XuiNode, account: dict[str, str]) -> str | None:
             params["flow"] = node.flow
         if node.network == "tcp" and node.spider_x:
             params["spx"] = node.spider_x
-    if node.network in ("xhttp", "splithttp") and node.path:
+    elif node.security == "tls":
+        params.update({"fp": node.fingerprint, "sni": node.sni})
+        if node.flow:
+            params["flow"] = node.flow
+
+    if node.network in ("ws", "websocket"):
+        if node.path:
+            params["path"] = node.path
+        if node.sni:
+            params["host"] = node.sni
+    elif node.network in ("xhttp", "splithttp") and node.path:
         params["path"] = node.path
 
     query = urlencode({k: v for k, v in params.items() if v}, quote_via=quote)
@@ -429,7 +441,9 @@ def _build_node_link(node: XuiNode, account: dict[str, str]) -> str | None:
 
 
 def _build_node_json_config(node: XuiNode, account: dict[str, str]) -> dict | None:
-    if not node.host or not node.port or not node.public_key:
+    if not node.host or not node.port:
+        return None
+    if node.security == "reality" and not node.public_key:
         return None
     short_id = _first_short_id(node.short_id)
     display_name = f"{node.flag} {node.profile_name}" if node.flag else node.profile_name
@@ -470,10 +484,14 @@ def _build_node_json_config(node: XuiNode, account: dict[str, str]) -> dict | No
             "serverName": node.sni,
             "allowInsecure": False,
             "fingerprint": node.fingerprint or "chrome",
+            "alpn": ["http/1.1"],
         }
     net = node.network or "tcp"
     if net in ("ws", "websocket"):
-        proxy["streamSettings"]["wsSettings"] = {"path": node.path or "/"}
+        ws: dict[str, Any] = {"path": node.path or "/"}
+        if node.sni:
+            ws["headers"] = {"Host": node.sni}
+        proxy["streamSettings"]["wsSettings"] = ws
     elif net in ("xhttp", "splithttp"):
         proxy["streamSettings"]["xhttpSettings"] = {"path": node.path or "/"}
     return {
