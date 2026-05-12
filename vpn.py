@@ -422,15 +422,14 @@ def _build_node_link(node: XuiNode, account: dict[str, str]) -> str | None:
     return f"vless://{account['uuid']}@{node.host}:{node.port}?{query}#{label}"
 
 
-def _build_node_json_outbound(node: XuiNode, account: dict[str, str]) -> dict | None:
+def _build_node_json_config(node: XuiNode, account: dict[str, str]) -> dict | None:
     if not node.host or not node.port or not node.public_key:
         return None
     short_id = _first_short_id(node.short_id)
     display_name = f"{node.flag} {node.profile_name}" if node.flag else node.profile_name
-    outbound: dict[str, Any] = {
+    proxy: dict[str, Any] = {
         "protocol": "vless",
-        "tag": display_name,
-        "remarks": display_name,
+        "tag": "proxy",
         "settings": {
             "vnext": [
                 {
@@ -453,7 +452,7 @@ def _build_node_json_outbound(node: XuiNode, account: dict[str, str]) -> dict | 
         },
     }
     if node.security == "reality":
-        outbound["streamSettings"]["realitySettings"] = {
+        proxy["streamSettings"]["realitySettings"] = {
             "serverName": node.sni,
             "fingerprint": node.fingerprint or "chrome",
             "publicKey": node.public_key,
@@ -461,17 +460,20 @@ def _build_node_json_outbound(node: XuiNode, account: dict[str, str]) -> dict | 
             "spiderX": node.spider_x or "/",
         }
     elif node.security == "tls":
-        outbound["streamSettings"]["tlsSettings"] = {
+        proxy["streamSettings"]["tlsSettings"] = {
             "serverName": node.sni,
             "allowInsecure": False,
             "fingerprint": node.fingerprint or "chrome",
         }
     net = node.network or "tcp"
     if net in ("ws", "websocket"):
-        outbound["streamSettings"]["wsSettings"] = {"path": node.path or "/"}
+        proxy["streamSettings"]["wsSettings"] = {"path": node.path or "/"}
     elif net in ("xhttp", "splithttp"):
-        outbound["streamSettings"]["xhttpSettings"] = {"path": node.path or "/"}
-    return outbound
+        proxy["streamSettings"]["xhttpSettings"] = {"path": node.path or "/"}
+    return {
+        "remarks": display_name,
+        "outbounds": [proxy, {"protocol": "freedom", "tag": "direct"}],
+    }
 
 
 async def build_json_subscription(token: str) -> list[dict] | None:
@@ -479,13 +481,13 @@ async def build_json_subscription(token: str) -> list[dict] | None:
     if not active or tg_id is None:
         return None
     nodes = _load_nodes()
-    outbounds: list[dict] = []
+    configs: list[dict] = []
     for node in nodes:
         account = _get_or_create_node_account(tg_id, node)
-        ob = _build_node_json_outbound(node, account)
-        if ob:
-            outbounds.append(ob)
-    return outbounds if outbounds else None
+        cfg = _build_node_json_config(node, account)
+        if cfg:
+            configs.append(cfg)
+    return configs if configs else None
 
 
 def _decode_subscription(text: str) -> list[str]:
@@ -569,9 +571,9 @@ async def handle_subscription(request: web.Request) -> web.Response:
                 headers["subscription-userinfo"] = f"upload=0; download=0; total=0; expire={expire}"
             except Exception:
                 pass
-    json_outbounds = await build_json_subscription(token)
-    if json_outbounds is not None:
-        body = json.dumps({"outbounds": json_outbounds}, ensure_ascii=False)
+    json_configs = await build_json_subscription(token)
+    if json_configs is not None:
+        body = json.dumps(json_configs, ensure_ascii=False)
         return web.Response(text=body, content_type="application/json", headers=headers)
     body = await build_merged_subscription(token)
     return web.Response(text=body, content_type="text/plain", headers=headers)
