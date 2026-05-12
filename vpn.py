@@ -265,7 +265,7 @@ async def _get_crypt5_url(sub_url: str) -> str:
                             return link
     except Exception as e:
         print(f"[crypt5] {e}")
-    return f"happ://add/{quote(sub_url, safe='')}"
+    return f"happ://add/{sub_url}"
 
 
 async def get_happ_activation_url(tg_id: int, username: str | None = None) -> str:
@@ -651,14 +651,42 @@ async def handle_redirect(request: web.Request) -> web.Response:
     target = request.query.get("to", "")
     if not target.startswith("happ://"):
         return web.Response(status=400, text="bad redirect")
-    html = (
-        "<!DOCTYPE html><html><head>"
-        f'<meta http-equiv="refresh" content="0;url={target}">'
-        "<script>"
-        f'window.location.href="{target}";'
-        "</script>"
-        "</head><body></body></html>"
-    )
+    sub_url = target[len("happ://add/"):]  if target.startswith("happ://add/") else ""
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FishVPN — открытие Happ</title>
+<style>
+  body{{font-family:sans-serif;background:#111;color:#eee;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:16px;box-sizing:border-box}}
+  .card{{background:#1e1e1e;border-radius:16px;padding:32px;max-width:480px;width:100%;text-align:center}}
+  h2{{margin:0 0 8px}}
+  p{{color:#aaa;font-size:14px;margin:0 0 24px}}
+  .btn{{display:inline-block;background:#4a90e2;color:#fff;padding:14px 28px;border-radius:10px;text-decoration:none;font-size:16px;font-weight:600;margin-bottom:16px}}
+  .url-box{{background:#2a2a2a;border-radius:8px;padding:12px;font-size:13px;word-break:break-all;text-align:left;color:#ccc;margin-bottom:8px}}
+  .hint{{color:#666;font-size:12px}}
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>🎣 FishVPN</h2>
+  <p>Нажмите кнопку ниже, чтобы открыть Happ и добавить подписку автоматически.</p>
+  <a class="btn" href="{target}">Открыть в Happ</a>
+  <p style="color:#666;font-size:13px;margin-bottom:12px">Или добавьте вручную: Happ → Subscriptions → + → вставьте ссылку:</p>
+  <div class="url-box">{sub_url}</div>
+  <div class="hint">Нажмите на ссылку, чтобы скопировать</div>
+</div>
+<script>
+  document.querySelector('.url-box').addEventListener('click',function(){{
+    navigator.clipboard&&navigator.clipboard.writeText('{sub_url}');
+    this.style.background='#1a3a1a';
+    this.innerText='✅ Скопировано!';
+  }});
+  setTimeout(function(){{window.location.href="{target}";}},800);
+</script>
+</body>
+</html>"""
     return web.Response(text=html, content_type="text/html")
 
 
