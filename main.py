@@ -14,6 +14,7 @@ from platega import create_platega_transaction, check_platega_status
 from vpn import (
     ensure_vpn_account,
     get_happ_activation_url,
+    get_subscription_url,
     init_vpn_db,
     start_subscription_server,
 )
@@ -326,20 +327,28 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             'macos':   ('💻 MacOS',   'https://apps.apple.com/us/app/happ-proxy-utility/id6504287215'),
         }
         name, download_url = info[platform]
-        text = (
-            f"📍Главное меню » <tg-emoji emoji-id='6032742198179532882'>⚙️</tg-emoji> Управление подпиской » 🔗 Подключиться к VPN » <b>{name}</b>\n\n"
-            "1. Нажмите «📥 Скачать приложение» и установите программу.\n\n"
-            "2. Нажмите «🔗 Активировать VPN-профиль», чтобы добавить подключение.\n\n"
-            "3. Готово! Выберите локацию и подключитесь!"
-        )
-        rows = []
-        if download_url:
-            rows.append([InlineKeyboardButton(text='📥 Скачать приложение', url=download_url)])
         is_active, end_date = await get_user_sub(user.id)
+        sub_url = None
         if is_active and end_date:
             try:
                 await ensure_vpn_account(user.id, end_date, user.username)
                 await upsert_device(user.id, platform)
+                sub_url = get_subscription_url(user.id, user.username)
+            except Exception as e:
+                print(f'[vpn sync ERROR] {type(e).__name__}: {e}')
+
+        sub_line = f"\n\n🔗 Ссылка для вставки в Happ:\n<code>{sub_url}</code>" if (platform == 'windows' and sub_url) else ""
+        text = (
+            f"📍Главное меню » <tg-emoji emoji-id='6032742198179532882'>⚙️</tg-emoji> Управление подпиской » 🔗 Подключиться к VPN » <b>{name}</b>\n\n"
+            "1. Нажмите «📥 Скачать приложение» и установите программу.\n\n"
+            "2. Нажмите «🔗 Активировать VPN-профиль», чтобы добавить подключение.\n\n"
+            f"3. Готово! Выберите локацию и подключитесь!{sub_line}"
+        )
+        rows = []
+        if download_url:
+            rows.append([InlineKeyboardButton(text='📥 Скачать приложение', url=download_url)])
+        if sub_url:
+            try:
                 happ_url = await get_happ_activation_url(user.id, user.username)
                 rows.append([InlineKeyboardButton(text='🔗 Активировать VPN-профиль', url=happ_url)])
             except Exception as e:
