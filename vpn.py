@@ -472,7 +472,49 @@ def _build_node_json_config(node: XuiNode, account: dict[str, str]) -> dict | No
         proxy["streamSettings"]["xhttpSettings"] = {"path": node.path or "/"}
     return {
         "remarks": display_name,
-        "outbounds": [proxy, {"protocol": "freedom", "tag": "direct"}],
+        "log": {"loglevel": "warning"},
+        "dns": {
+            "queryStrategy": "UseIP",
+            "servers": ["1.1.1.1", "1.0.0.1", "8.8.8.8"],
+        },
+        "inbounds": [
+            {
+                "listen": "127.0.0.1",
+                "port": 10808,
+                "protocol": "socks",
+                "settings": {"auth": "noauth", "udp": True},
+                "sniffing": {
+                    "destOverride": ["http", "tls", "quic"],
+                    "enabled": True,
+                    "routeOnly": False,
+                },
+                "tag": "socks",
+            },
+            {
+                "listen": "127.0.0.1",
+                "port": 10809,
+                "protocol": "http",
+                "settings": {"allowTransparent": False},
+                "sniffing": {
+                    "destOverride": ["http", "tls", "quic"],
+                    "enabled": True,
+                    "routeOnly": False,
+                },
+                "tag": "http",
+            },
+        ],
+        "outbounds": [
+            proxy,
+            {"protocol": "freedom", "tag": "direct"},
+            {"protocol": "blackhole", "tag": "block"},
+        ],
+        "routing": {
+            "domainMatcher": "hybrid",
+            "domainStrategy": "IPIfNonMatch",
+            "rules": [
+                {"outboundTag": "direct", "protocol": ["bittorrent"], "type": "field"},
+            ],
+        },
     }
 
 
