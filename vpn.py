@@ -43,6 +43,7 @@ class XuiNode:
     flow: str
     spider_x: str
     path: str
+    flag: str
 
 
 def _bool_env(name: str, default: bool = False) -> bool:
@@ -93,6 +94,7 @@ def _load_nodes() -> list[XuiNode]:
                 flow=os.getenv(prefix + "FLOW", os.getenv("VPN_FLOW", "xtls-rprx-vision")).strip(),
                 spider_x=os.getenv(prefix + "SPIDER_X", "/").strip(),
                 path=os.getenv(prefix + "PATH", "/").strip(),
+                flag=os.getenv(prefix + "FLAG", "").strip(),
             )
         )
     return nodes
@@ -415,7 +417,8 @@ def _build_node_link(node: XuiNode, account: dict[str, str]) -> str | None:
         params["path"] = node.path
 
     query = urlencode({k: v for k, v in params.items() if v}, quote_via=quote)
-    label = quote(node.profile_name, safe="")
+    display_name = f"{node.flag} {node.profile_name}" if node.flag else node.profile_name
+    label = quote(display_name, safe="")
     return f"vless://{account['uuid']}@{node.host}:{node.port}?{query}#{label}"
 
 
@@ -423,9 +426,10 @@ def _build_node_json_outbound(node: XuiNode, account: dict[str, str]) -> dict | 
     if not node.host or not node.port or not node.public_key:
         return None
     short_id = _first_short_id(node.short_id)
+    display_name = f"{node.flag} {node.profile_name}" if node.flag else node.profile_name
     outbound: dict[str, Any] = {
         "protocol": "vless",
-        "tag": node.profile_name,
+        "tag": display_name,
         "settings": {
             "vnext": [
                 {
@@ -553,7 +557,7 @@ async def handle_subscription(request: web.Request) -> web.Response:
     info = _get_sub_info_by_token(token)
     if info:
         username = (info["username"] or "").strip() or "User"
-        headers["profile-title"] = f"FishVPN | {username[:20]}"
+        headers["profile-title"] = f"FishVPN 🎣 | {username[:20]}"
         headers["profile-update-interval"] = "6"
         headers["support-url"] = os.getenv("SUPPORT_URL", "https://t.me/FishVPN_info")
         if info["end_of_sub"]:
