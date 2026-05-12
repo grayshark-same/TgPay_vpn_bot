@@ -258,9 +258,11 @@ async def _get_crypt5_url(sub_url: str) -> str:
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json(content_type=None)
-                    link = data.get("link", "")
-                    if link.startswith("happ://"):
-                        return link
+                    print(f"[crypt5] API response: {data}")
+                    for field in ("link", "url", "href", "result", "encrypted"):
+                        link = data.get(field, "")
+                        if isinstance(link, str) and link.startswith("happ://"):
+                            return link
     except Exception as e:
         print(f"[crypt5] {e}")
     return f"happ://add/{quote(sub_url, safe='')}"
@@ -649,7 +651,15 @@ async def handle_redirect(request: web.Request) -> web.Response:
     target = request.query.get("to", "")
     if not target.startswith("happ://"):
         return web.Response(status=400, text="bad redirect")
-    raise web.HTTPFound(target)
+    html = (
+        "<!DOCTYPE html><html><head>"
+        f'<meta http-equiv="refresh" content="0;url={target}">'
+        "<script>"
+        f'window.location.href="{target}";'
+        "</script>"
+        "</head><body></body></html>"
+    )
+    return web.Response(text=html, content_type="text/html")
 
 
 async def handle_health(_: web.Request) -> web.Response:
