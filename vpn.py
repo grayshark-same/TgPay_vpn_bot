@@ -44,6 +44,7 @@ class XuiNode:
     spider_x: str
     path: str
     flag: str
+    fixed_uuid: str
 
 
 def _bool_env(name: str, default: bool = False) -> bool:
@@ -95,6 +96,7 @@ def _load_nodes() -> list[XuiNode]:
                 spider_x=os.getenv(prefix + "SPIDER_X", "/").strip(),
                 path=os.getenv(prefix + "PATH", "/").strip(),
                 flag=os.getenv(prefix + "FLAG", "").strip(),
+                fixed_uuid=os.getenv(prefix + "FIXED_UUID", "").strip(),
             )
         )
     return nodes
@@ -154,6 +156,10 @@ def _vpn_identity(tg_id: int, username: str | None = None) -> dict[str, str]:
 
 def _first_short_id(short_ids: str) -> str:
     return next((short_id.strip() for short_id in short_ids.split(",") if short_id.strip()), "")
+
+
+def _resolve_uuid(node: "XuiNode", account: dict[str, str]) -> str:
+    return node.fixed_uuid if node.fixed_uuid else account["uuid"]
 
 
 def _get_or_create_account(tg_id: int, username: str | None = None) -> dict[str, str]:
@@ -419,7 +425,7 @@ def _build_node_link(node: XuiNode, account: dict[str, str]) -> str | None:
     query = urlencode({k: v for k, v in params.items() if v}, quote_via=quote)
     display_name = f"{node.flag} {node.profile_name}" if node.flag else node.profile_name
     label = quote(display_name, safe="")
-    return f"vless://{account['uuid']}@{node.host}:{node.port}?{query}#{label}"
+    return f"vless://{_resolve_uuid(node, account)}@{node.host}:{node.port}?{query}#{label}"
 
 
 def _build_node_json_config(node: XuiNode, account: dict[str, str]) -> dict | None:
@@ -437,7 +443,7 @@ def _build_node_json_config(node: XuiNode, account: dict[str, str]) -> dict | No
                     "port": node.port,
                     "users": [
                         {
-                            "id": account["uuid"],
+                            "id": _resolve_uuid(node, account),
                             "flow": node.flow or "",
                             "encryption": "none",
                             "level": 0,
