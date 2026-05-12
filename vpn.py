@@ -238,7 +238,7 @@ def get_subscription_url(tg_id: int, username: str | None = None) -> str:
 
 def get_happ_activation_url(tg_id: int, username: str | None = None) -> str:
     sub_url = get_subscription_url(tg_id, username)
-    encoded_sub_url = quote(base64.b64encode(sub_url.encode()).decode(), safe="")
+    encoded_sub_url = base64.urlsafe_b64encode(sub_url.encode()).decode().rstrip("=")
     happ_url = f"happ://crypt3/{encoded_sub_url}"
     return f"{PUBLIC_SUB_URL}/redirect?to={quote(happ_url, safe='')}"
 
