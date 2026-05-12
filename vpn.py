@@ -4,6 +4,7 @@ import json
 import os
 import secrets
 import sqlite3
+import uuid as _uuid
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, urlencode, urlsplit, urlunsplit
@@ -139,9 +140,12 @@ def _get_stored_username(tg_id: int) -> str | None:
     return row[0] if row and row[0] else None
 
 
+_FISHVPN_NS = _uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+
+
 def _vpn_identity(tg_id: int, username: str | None = None) -> dict[str, str]:
     return {
-        "uuid": str(tg_id),
+        "uuid": str(_uuid.uuid5(_FISHVPN_NS, str(tg_id))),
         "email": _normalize_tg_username(tg_id, username),
     }
 
@@ -299,7 +303,7 @@ class XuiClient:
         async with session.request(method, url, ssl=self.verify_ssl, **kwargs) as resp:
             text = await resp.text()
             if resp.status >= 400:
-                raise RuntimeError(f"{self.node.name}: {resp.status} {text[:300]}")
+                raise RuntimeError(f"{self.node.name}: {resp.status} {method} {url} — {text[:300]}")
             if not text:
                 return {}
             try:
