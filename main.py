@@ -338,7 +338,8 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
         if is_active and end_date:
             try:
                 await ensure_vpn_account(user.id, end_date, user.username)
-                rows.append([InlineKeyboardButton(text='🔗 Активировать VPN-профиль', url=get_happ_activation_url(user.id, user.username))])
+                happ_url = await get_happ_activation_url(user.id, user.username)
+                rows.append([InlineKeyboardButton(text='🔗 Активировать VPN-профиль', url=happ_url)])
             except Exception as e:
                 print(f'[vpn sync ERROR] {type(e).__name__}: {e}')
                 rows.append([InlineKeyboardButton(text='🔗 Активировать VPN-профиль', callback_data='activate_error')])
@@ -375,8 +376,9 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             f"<code>{sub_url}</code>\n\n"
             "Эта ссылка содержит все доступные серверы и действует до конца подписки."
         )
+        happ_url = await get_happ_activation_url(user.id, user.username)
         await edit_or_answer(callback, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text='🔗 Активировать в Happ', url=get_happ_activation_url(user.id, user.username))],
+            [InlineKeyboardButton(text='🔗 Активировать в Happ', url=happ_url)],
             [back_btn('settings')[0]]
         ]))
 

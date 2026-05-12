@@ -240,9 +240,27 @@ def get_subscription_url(tg_id: int, username: str | None = None) -> str:
     return f"{PUBLIC_SUB_URL}/sub/{account['sub_token']}"
 
 
-def get_happ_activation_url(tg_id: int, username: str | None = None) -> str:
+async def _get_crypt5_url(sub_url: str) -> str:
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://crypto.happ.su/api-v2.php",
+                json={"url": sub_url},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json(content_type=None)
+                    link = data.get("link", "")
+                    if link.startswith("happ://"):
+                        return link
+    except Exception as e:
+        print(f"[crypt5] {e}")
+    return f"happ://add/{quote(sub_url, safe='')}"
+
+
+async def get_happ_activation_url(tg_id: int, username: str | None = None) -> str:
     sub_url = get_subscription_url(tg_id, username)
-    happ_url = f"happ://add/{quote(sub_url, safe='')}"
+    happ_url = await _get_crypt5_url(sub_url)
     return f"{PUBLIC_SUB_URL}/redirect?to={quote(happ_url, safe='')}"
 
 
@@ -312,9 +330,13 @@ class XuiClient:
 
     async def _login(self, session: aiohttp.ClientSession) -> None:
         payload = {"username": self.node.username, "password": self.node.password}
-        data = await self._request(session, "POST", "/login", json=payload)
-        if data.get("success") is False:
-            data = await self._request(session, "POST", "/login", data=payload)
+        try:
+            data = await self._request(session, "POST", "/login", json=payload)
+            if data.get("success") is not False:
+                return
+        except RuntimeError:
+            pass
+        data = await self._request(session, "POST", "/login", data=payload)
         if data.get("success") is False:
             raise RuntimeError(f"{self.node.name}: login failed: {data.get('msg')}")
 
@@ -443,9 +465,43 @@ async def build_merged_subscription(token: str) -> str:
     return base64.b64encode("\n".join(deduped_links).encode()).decode()
 
 
+def _get_sub_info_by_token(token: str) -> dict | None:
+    with sqlite3.connect(USERS_DB) as db:
+        cur = db.cursor()
+        cur.execute(
+            """
+            SELECT users.end_of_sub, users.username
+            FROM vpn_accounts
+            JOIN users ON users.tg_id = vpn_accounts.tg_id
+            WHERE vpn_accounts.sub_token = ?
+            """,
+            (token,),
+        )
+        row = cur.fetchone()
+    if not row:
+        return None
+    return {"end_of_sub": row[0], "username": row[1]}
+
+
 async def handle_subscription(request: web.Request) -> web.Response:
-    body = await build_merged_subscription(request.match_info["token"])
-    return web.Response(text=body, content_type="text/plain")
+    token = request.match_info["token"]
+    body = await build_merged_subscription(token)
+    headers: dict[str, str] = {}
+    info = _get_sub_info_by_token(token)
+    if info:
+        username = (info["username"] or "").strip() or "User"
+        headers["profile-title"] = f"FishVPN | {username[:20]}"
+        headers["profile-update-interval"] = "6"
+        headers["support-url"] = os.getenv("SUPPORT_URL", "https://t.me/FishVPN_info")
+        if info["end_of_sub"]:
+            try:
+                expire = int(
+                    datetime.datetime.strptime(info["end_of_sub"], "%Y-%m-%d %H:%M:%S").timestamp()
+                )
+                headers["subscription-userinfo"] = f"upload=0; download=0; total=0; expire={expire}"
+            except Exception:
+                pass
+    return web.Response(text=body, content_type="text/plain", headers=headers)
 
 
 async def handle_redirect(request: web.Request) -> web.Response:
