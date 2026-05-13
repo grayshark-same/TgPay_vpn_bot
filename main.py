@@ -565,13 +565,16 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             if ref_id:
                 *_, ref_procent = await get_ref_info(ref_id)
                 try:
+                    uname = f"@{user.username}" if user.username else f"ID {user.id}"
                     if ref_procent > 0:
                         reward = int(summ * ref_procent / 100)
                         if reward > 0:
                             await add_ref_balance(ref_id, reward)
                             await bot.send_message(
                                 ref_id,
-                                f'<tg-emoji emoji-id="6041731551845159060">🎉</tg-emoji> Ваш реферал оплатил подписку!\n'
+                                f'<tg-emoji emoji-id="6041731551845159060">🎉</tg-emoji> <b>Реферал оплатил подписку!</b>\n\n'
+                                f'👤 {uname}\n'
+                                f'💵 Сумма: <code>{summ}₽</code>\n'
                                 f'<tg-emoji emoji-id="5890848474563352982">🪙</tg-emoji> Вам начислено <b>{reward}₽</b> на реферальный баланс.',
                                 parse_mode='HTML'
                             )
@@ -579,8 +582,10 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
                         await add_days_to_sub(ref_id, 10)
                         await bot.send_message(
                             ref_id,
-                            f'<tg-emoji emoji-id="6041731551845159060">🎉</tg-emoji> Ваш реферал оплатил подписку!\n'
-                            f'🎁 Вам добавлено <b>10 дней</b> бесплатной подписки.',
+                            f'<tg-emoji emoji-id="6041731551845159060">🎉</tg-emoji> <b>Реферал оплатил подписку!</b>\n\n'
+                            f'👤 {uname}\n'
+                            f'💵 Сумма: <code>{summ}₽</code>\n'
+                            f'🎁 Вам добавлено <b>+10 дней</b> бесплатной подписки.',
                             parse_mode='HTML'
                         )
                 except Exception:
