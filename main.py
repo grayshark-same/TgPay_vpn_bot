@@ -122,8 +122,8 @@ async def edit_or_answer(callback: CallbackQuery, text: str, reply_markup=None, 
 
 
 ARCHIVE_CHAT_ID = -5059665233
-CHANNEL_ID = os.getenv('CANNEL_ID')
-CHANNEL_URL = os.getenv('CANNEL_URL')
+CHANNEL_ID = os.getenv('CHANNEL_ID')
+CHANNEL_URL = os.getenv('CHANNEL_URL')
 
 _sub_required_text = (
     '<tg-emoji emoji-id="6021418126061605425">📢</tg-emoji>  Для использования бота подпишитесь на <a href="http://t.me/FishVPN_info">наш канал</a>.\n\n'
