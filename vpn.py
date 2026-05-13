@@ -66,7 +66,7 @@ def _int_env(name: str, default: int = 0) -> int:
 
 def _load_nodes() -> list[XuiNode]:
     nodes = []
-    for idx in range(1, 10):
+    for idx in range(1, 20):
         prefix = f"VPN_NODE_{idx}_"
         panel_url = os.getenv(prefix + "PANEL", "").rstrip("/")
         host = os.getenv(prefix + "HOST", "").strip()
