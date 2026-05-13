@@ -121,6 +121,7 @@ async def edit_or_answer(callback: CallbackQuery, text: str, reply_markup=None, 
         print(f'[edit_or_answer] {type(e).__name__}: {e}')
 
 
+ARCHIVE_CHAT_ID = -5059665233
 CHANNEL_ID = '@FishVPN_info'
 CHANNEL_URL = 'https://t.me/FishVPN_info'
 
@@ -189,6 +190,40 @@ async def send_main_menu(target, user_id, username=None):
 
 
 
+async def _archive_topup(tg_id: int, summ: int, provider: str = "Platega", username: str | None = None):
+    uname = f"@{username}" if username else f"tg_id: {tg_id}"
+    now = datetime.datetime.now().strftime("%d.%m.%Y %H:%M")
+    text = (
+        f"💰 <b>Пополнение баланса</b>\n\n"
+        f"👤 Клиент: {uname}\n"
+        f"🆔 TG ID: <code>{tg_id}</code>\n"
+        f"💵 Сумма: <code>{summ}</code>₽\n"
+        f"🏦 Провайдер: {provider}\n\n"
+        f"🕖 Дата: {now}"
+    )
+    try:
+        await bot.send_message(ARCHIVE_CHAT_ID, text, parse_mode='HTML')
+    except Exception as e:
+        print(f'[archive] topup error: {e}')
+
+
+async def _archive_purchase(tg_id: int, summ: int, plan: int, username: str | None = None):
+    uname = f"@{username}" if username else f"tg_id: {tg_id}"
+    now = datetime.datetime.now().strftime("%d.%m.%Y %H:%M")
+    text = (
+        f"🛒 <b>Покупка подписки</b>\n\n"
+        f"👤 Клиент: {uname}\n"
+        f"🆔 TG ID: <code>{tg_id}</code>\n"
+        f"📦 Тариф: {plan_names[plan]}\n"
+        f"💵 Сумма: <code>{summ}</code>₽\n\n"
+        f"🕖 Дата: {now}"
+    )
+    try:
+        await bot.send_message(ARCHIVE_CHAT_ID, text, parse_mode='HTML')
+    except Exception as e:
+        print(f'[archive] purchase error: {e}')
+
+
 async def poll_transaction(transaction_id: str, tg_id: int, summ: int):
     import asyncio
     for _ in range(90):  # 90 * 10s = 15 минут
@@ -197,6 +232,7 @@ async def poll_transaction(transaction_id: str, tg_id: int, summ: int):
         if status == 'CONFIRMED':
             await add_balance(tg_id=tg_id, summ=summ)
             await add_report(money=summ)
+            await _archive_topup(tg_id, summ)
             try:
                 await bot.send_message(
                     tg_id,
@@ -491,6 +527,7 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
         if summ <= await get_user_balance(user.id):
             await add_balance(summ=-summ, tg_id=user.id)
             await add_sub(tg_id=user.id, plan=plan)
+            await _archive_purchase(user.id, summ, plan, user.username)
             _, end_date = await get_user_sub(user.id)
             if end_date:
                 try:
@@ -669,6 +706,7 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             await add_balance(tg_id=uid,summ=summ)
             # await add_sub(tg_id=uid, summ=summ)
             await add_report(money=summ)
+            await _archive_topup(uid, summ, provider="Ручное пополнение")
             await bot.send_message(chat_id=uid, text=f'<tg-emoji emoji-id="5774022692642492953">✅</tg-emoji> Ваш баланс пополнен на <code>{summ}₽</code>!', parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_menu_btn()[0]]]))
         elif data.startswith('decline_'):
             uid = int(data.split('_')[1])
