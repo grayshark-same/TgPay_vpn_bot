@@ -343,9 +343,8 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
 
     if data == 'check_sub':
         if await is_subscribed(user.id):
-            await callback.message.delete()
             await add_user(user.id, user.username)
-            await send_main_menu(callback.message, user.id, user.username)
+            await send_main_menu(callback, user.id, user.username)
         else:
             await callback.answer('❌ Вы ещё не подписались на канал!', show_alert=True)
         return
@@ -416,7 +415,7 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
         )
         rows = []
         if download_url:
-            rows.append([InlineKeyboardButton(text='📥 Скачать приложение', url=download_url)])
+            rows.append([InlineKeyboardButton(text='📥 Скачать Happ (US App Store)', url=download_url)])
         if platform == 'ios':
             rows.append([InlineKeyboardButton(text='📥 Скачать Happ (RU App Store)', url='https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973')])
         if sub_url:
