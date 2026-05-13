@@ -392,9 +392,12 @@ async def ensure_vpn_account(tg_id: int, end_date: datetime.datetime, username: 
     for node in nodes:
         node_account = _get_or_create_node_account(tg_id, node, username)
         if node.panel_url and node.username and node.password and node.inbound_id:
-            await XuiClient(node).sync_client(tg_id, node_account, end_date)
-        elif not _build_node_link(node, node_account) and not _build_node_json_config(node, node_account):
-            raise RuntimeError(f"{node.name}: 3x-ui panel is not configured and direct link fields are incomplete")
+            try:
+                await XuiClient(node).sync_client(tg_id, node_account, end_date)
+            except Exception as e:
+                print(f"[vpn] panel sync failed for {node.name}: {e}")
+        elif not _build_node_link(node, node_account) and not node.sub_base_url:
+            print(f"[vpn] skipping {node.name}: no panel and no direct link fields")
     return get_subscription_url(tg_id, username)
 
 
