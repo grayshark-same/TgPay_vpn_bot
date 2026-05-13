@@ -121,6 +121,7 @@ async def edit_or_answer(callback: CallbackQuery, text: str, reply_markup=None, 
         print(f'[edit_or_answer] {type(e).__name__}: {e}')
 
 
+ARCHIVE_CHAT_ID = -5059665233
 CHANNEL_ID = '@FishVPN_info'
 CHANNEL_URL = 'https://t.me/FishVPN_info'
 
@@ -189,6 +190,40 @@ async def send_main_menu(target, user_id, username=None):
 
 
 
+async def _archive_topup(tg_id: int, summ: int, provider: str = "Platega", username: str | None = None):
+    uname = f"@{username}" if username else f"tg_id: {tg_id}"
+    now = datetime.datetime.now().strftime("%d.%m.%Y %H:%M")
+    text = (
+        f"💰 <b>Пополнение баланса</b>\n\n"
+        f"👤 Клиент: {uname}\n"
+        f"🆔 TG ID: <code>{tg_id}</code>\n"
+        f"💵 Сумма: <code>{summ}</code>₽\n"
+        f"🏦 Провайдер: {provider}\n\n"
+        f"🕖 Дата: {now}"
+    )
+    try:
+        await bot.send_message(ARCHIVE_CHAT_ID, text, parse_mode='HTML')
+    except Exception as e:
+        print(f'[archive] topup error: {e}')
+
+
+async def _archive_purchase(tg_id: int, summ: int, plan: int, username: str | None = None):
+    uname = f"@{username}" if username else f"tg_id: {tg_id}"
+    now = datetime.datetime.now().strftime("%d.%m.%Y %H:%M")
+    text = (
+        f"🛒 <b>Покупка подписки</b>\n\n"
+        f"👤 Клиент: {uname}\n"
+        f"🆔 TG ID: <code>{tg_id}</code>\n"
+        f"📦 Тариф: {plan_names[plan]}\n"
+        f"💵 Сумма: <code>{summ}</code>₽\n\n"
+        f"🕖 Дата: {now}"
+    )
+    try:
+        await bot.send_message(ARCHIVE_CHAT_ID, text, parse_mode='HTML')
+    except Exception as e:
+        print(f'[archive] purchase error: {e}')
+
+
 async def poll_transaction(transaction_id: str, tg_id: int, summ: int):
     import asyncio
     for _ in range(90):  # 90 * 10s = 15 минут
@@ -197,6 +232,21 @@ async def poll_transaction(transaction_id: str, tg_id: int, summ: int):
         if status == 'CONFIRMED':
             await add_balance(tg_id=tg_id, summ=summ)
             await add_report(money=summ)
+            await _archive_topup(tg_id, summ)
+            ref_id = await get_ref_id(tg_id)
+            if ref_id:
+                user_info = await get_user_info(tg_id)
+                uname = f"@{user_info[1]}" if user_info and user_info[1] else f"ID {tg_id}"
+                try:
+                    await bot.send_message(
+                        ref_id,
+                        f'<tg-emoji emoji-id="5890848474563352982">🪙</tg-emoji> <b>Реферал пополнил баланс!</b>\n\n'
+                        f'👤 {uname}\n'
+                        f'💵 Сумма: <code>{summ}₽</code>',
+                        parse_mode='HTML'
+                    )
+                except Exception:
+                    pass
             try:
                 await bot.send_message(
                     tg_id,
@@ -226,8 +276,21 @@ async def start_handler(message: Message):
         return
     is_new = await add_user(message.from_user.id, message.from_user.username)
     args = message.text.split() if message.text else []
+    ref_id_from_link = 0
     if len(args) > 1 and args[1].isdigit():
-        await set_ref_id(message.from_user.id, int(args[1]))
+        ref_id_from_link = int(args[1])
+        await set_ref_id(message.from_user.id, ref_id_from_link)
+    if is_new and ref_id_from_link and ref_id_from_link != message.from_user.id:
+        uname = f"@{message.from_user.username}" if message.from_user.username else f"ID {message.from_user.id}"
+        try:
+            await bot.send_message(
+                ref_id_from_link,
+                f'<tg-emoji emoji-id="6033125983572201397">👥</tg-emoji> <b>Новый реферал!</b>\n\n'
+                f'По вашей реферальной ссылке перешёл {uname}.',
+                parse_mode='HTML'
+            )
+        except Exception:
+            pass
     await send_main_menu(message, message.from_user.id, message.from_user.username)
     if is_new:
         await message.answer(
@@ -493,6 +556,7 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
         if summ <= await get_user_balance(user.id):
             await add_balance(summ=-summ, tg_id=user.id)
             await add_sub(tg_id=user.id, plan=plan)
+            await _archive_purchase(user.id, summ, plan, user.username)
             _, end_date = await get_user_sub(user.id)
             if end_date:
                 try:
@@ -503,13 +567,16 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             if ref_id:
                 *_, ref_procent = await get_ref_info(ref_id)
                 try:
+                    uname = f"@{user.username}" if user.username else f"ID {user.id}"
                     if ref_procent > 0:
                         reward = int(summ * ref_procent / 100)
                         if reward > 0:
                             await add_ref_balance(ref_id, reward)
                             await bot.send_message(
                                 ref_id,
-                                f'<tg-emoji emoji-id="6041731551845159060">🎉</tg-emoji> Ваш реферал оплатил подписку!\n'
+                                f'<tg-emoji emoji-id="6041731551845159060">🎉</tg-emoji> <b>Реферал оплатил подписку!</b>\n\n'
+                                f'👤 {uname}\n'
+                                f'💵 Сумма: <code>{summ}₽</code>\n'
                                 f'<tg-emoji emoji-id="5890848474563352982">🪙</tg-emoji> Вам начислено <b>{reward}₽</b> на реферальный баланс.',
                                 parse_mode='HTML'
                             )
@@ -517,8 +584,10 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
                         await add_days_to_sub(ref_id, 10)
                         await bot.send_message(
                             ref_id,
-                            f'<tg-emoji emoji-id="6041731551845159060">🎉</tg-emoji> Ваш реферал оплатил подписку!\n'
-                            f'🎁 Вам добавлено <b>10 дней</b> бесплатной подписки.',
+                            f'<tg-emoji emoji-id="6041731551845159060">🎉</tg-emoji> <b>Реферал оплатил подписку!</b>\n\n'
+                            f'👤 {uname}\n'
+                            f'💵 Сумма: <code>{summ}₽</code>\n'
+                            f'🎁 Вам добавлено <b>+10 дней</b> бесплатной подписки.',
                             parse_mode='HTML'
                         )
                 except Exception:
@@ -671,6 +740,7 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             await add_balance(tg_id=uid,summ=summ)
             # await add_sub(tg_id=uid, summ=summ)
             await add_report(money=summ)
+            await _archive_topup(uid, summ, provider="Ручное пополнение")
             await bot.send_message(chat_id=uid, text=f'<tg-emoji emoji-id="5774022692642492953">✅</tg-emoji> Ваш баланс пополнен на <code>{summ}₽</code>!', parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_menu_btn()[0]]]))
         elif data.startswith('decline_'):
             uid = int(data.split('_')[1])
