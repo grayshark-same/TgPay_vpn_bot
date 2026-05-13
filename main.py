@@ -418,7 +418,7 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             rows.append([InlineKeyboardButton(text='📥 Скачать Happ (US App Store)', url=download_url)])
         if platform == 'ios':
             rows.append([InlineKeyboardButton(text='📥 Скачать Happ (RU App Store)', url='https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973')])
-        if sub_url:
+        if sub_url: 
             try:
                 happ_url = await get_happ_activation_url(user.id, user.username)
                 rows.append([InlineKeyboardButton(text='🔗 Активировать VPN-профиль', url=happ_url)])
