@@ -233,6 +233,20 @@ async def poll_transaction(transaction_id: str, tg_id: int, summ: int):
             await add_balance(tg_id=tg_id, summ=summ)
             await add_report(money=summ)
             await _archive_topup(tg_id, summ)
+            ref_id = await get_ref_id(tg_id)
+            if ref_id:
+                user_info = await get_user_info(tg_id)
+                uname = f"@{user_info[1]}" if user_info and user_info[1] else f"ID {tg_id}"
+                try:
+                    await bot.send_message(
+                        ref_id,
+                        f'<tg-emoji emoji-id="5890848474563352982">🪙</tg-emoji> <b>Реферал пополнил баланс!</b>\n\n'
+                        f'👤 {uname}\n'
+                        f'💵 Сумма: <code>{summ}₽</code>',
+                        parse_mode='HTML'
+                    )
+                except Exception:
+                    pass
             try:
                 await bot.send_message(
                     tg_id,
@@ -262,8 +276,21 @@ async def start_handler(message: Message):
         return
     is_new = await add_user(message.from_user.id, message.from_user.username)
     args = message.text.split() if message.text else []
+    ref_id_from_link = 0
     if len(args) > 1 and args[1].isdigit():
-        await set_ref_id(message.from_user.id, int(args[1]))
+        ref_id_from_link = int(args[1])
+        await set_ref_id(message.from_user.id, ref_id_from_link)
+    if is_new and ref_id_from_link and ref_id_from_link != message.from_user.id:
+        uname = f"@{message.from_user.username}" if message.from_user.username else f"ID {message.from_user.id}"
+        try:
+            await bot.send_message(
+                ref_id_from_link,
+                f'<tg-emoji emoji-id="6033125983572201397">👥</tg-emoji> <b>Новый реферал!</b>\n\n'
+                f'По вашей реферальной ссылке перешёл {uname}.',
+                parse_mode='HTML'
+            )
+        except Exception:
+            pass
     await send_main_menu(message, message.from_user.id, message.from_user.username)
     if is_new:
         await message.answer(

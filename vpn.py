@@ -629,7 +629,7 @@ async def handle_subscription(request: web.Request) -> web.Response:
     if info:
         username = (info["username"] or "").strip() or "User"
         headers["profile-title"] = f"FishVPN 🎣 | {username[:20]}"
-        headers["profile-update-interval"] = "6"
+        headers["profile-update-interval"] = "1"
         headers["support-url"] = os.getenv("SUPPORT_URL", "https://t.me/FishVPN_info")
         if info["end_of_sub"]:
             try:
