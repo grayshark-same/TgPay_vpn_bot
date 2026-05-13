@@ -438,6 +438,8 @@ def _build_node_link(node: XuiNode, account: dict[str, str]) -> str | None:
             params["host"] = node.sni
     elif node.network in ("xhttp", "splithttp") and node.path:
         params["path"] = node.path
+    elif node.network == "grpc" and node.path:
+        params["serviceName"] = node.path
 
     query = urlencode({k: v for k, v in params.items() if v}, quote_via=quote)
     display_name = f"{node.flag} {node.profile_name}" if node.flag else node.profile_name
