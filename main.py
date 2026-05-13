@@ -122,8 +122,8 @@ async def edit_or_answer(callback: CallbackQuery, text: str, reply_markup=None, 
 
 
 ARCHIVE_CHAT_ID = -5059665233
-CHANNEL_ID = '@FishVPN_info'
-CHANNEL_URL = 'https://t.me/FishVPN_info'
+CHANNEL_ID = os.getenv('PUBLIC_SUB_ID')
+CHANNEL_URL = os.getenv('PUBLIC_SUB_URL')
 
 _sub_required_text = (
     '<tg-emoji emoji-id="6021418126061605425">📢</tg-emoji>  Для использования бота подпишитесь на <a href="http://t.me/FishVPN_info">наш канал</a>.\n\n'
@@ -237,16 +237,23 @@ async def poll_transaction(transaction_id: str, tg_id: int, summ: int):
             if ref_id:
                 user_info = await get_user_info(tg_id)
                 uname = f"@{user_info[1]}" if user_info and user_info[1] else f"ID {tg_id}"
-                try:
-                    await bot.send_message(
-                        ref_id,
-                        f'<tg-emoji emoji-id="5890848474563352982">🪙</tg-emoji> <b>Реферал пополнил баланс!</b>\n\n'
-                        f'👤 {uname}\n'
-                        f'💵 Сумма: <code>{summ}₽</code>',
-                        parse_mode='HTML'
-                    )
-                except Exception:
-                    pass
+                *_, ref_procent = await get_ref_info(ref_id)
+                if ref_procent > 0:
+                    reward = int(summ * ref_procent / 100)
+                    if reward > 0:
+                        await add_ref_balance(ref_id, reward)
+                    try:
+                        await bot.send_message(
+                            ref_id,
+                            f'<tg-emoji emoji-id="5890848474563352982">🪙</tg-emoji> <b>Реферальная комиссия!</b>\n\n'
+                            f'<tg-emoji emoji-id="6033108709213736873">➕</tg-emoji> Ваш реферал {uname}\n'
+                            f'<tg-emoji emoji-id="5258204546391351475">💰</tg-emoji> Пополнил баланс на <code>{summ}</code> ₽\n\n'
+                            f'<tg-emoji emoji-id="5805298713211447980">🎁</tg-emoji> Ваша комиссия ({ref_procent}%): <code>{reward}</code> ₽\n\n'
+                            f'<tg-emoji emoji-id="5836907383292436018">💎</tg-emoji> Средства зачислены на ваш баланс.',
+                            parse_mode='HTML'
+                        )
+                    except Exception:
+                        pass
             try:
                 await bot.send_message(
                     tg_id,
