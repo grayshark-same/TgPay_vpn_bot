@@ -20,7 +20,7 @@ from vpn import (
 )
 import sqlite3
 
-load_dotenv()
+load_dotenv() 
 
 _proxy = os.getenv('PROXY')
 bot = Bot(os.getenv('BOT_TOKEN'), session=AiohttpSession(proxy=_proxy) if _proxy else None)
