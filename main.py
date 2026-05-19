@@ -121,7 +121,7 @@ async def edit_or_answer(callback: CallbackQuery, text: str, reply_markup=None, 
         print(f'[edit_or_answer] {type(e).__name__}: {e}')
 
 
-ARCHIVE_CHAT_ID = -5059665233
+ARCHIVE_CHAT_ID = os.getenv('ARCHIVE_CHAT_ID')
 CHANNEL_ID = os.getenv('CHANNEL_ID')
 CHANNEL_URL = os.getenv('CHANNEL_URL')
 
@@ -156,27 +156,28 @@ def back_btn(cb):
 async def send_main_menu(target, user_id, username=None):
     await add_user(user_id, username)
     is_active, end_date = await get_user_sub(user_id)
-    status = "активна ✅" if is_active else "не активна ❌"
+    status = "Активна ✅" if is_active else "Не активна ❌"
     date_str = end_date.strftime("%d.%m.%Y") if end_date else "—"
     balance = await get_user_balance(user_id)
 
     text = (
-        '<b>🎣 Fish VPN</b> – Стабильный, защищенный и анонимный VPN.\n\n'
-        "• 🇳🇱 Нидерланды\n• 🇫🇮 Финляндия\n• 🇺🇸 США\n• 🇩🇪 Германия\n• 🇰🇿 Казахстан\n\n"
-        f"<blockquote>📌 Ваша подписка:\n"
-        f"Статус: <code>{status}</code>\n"
-        f"Действует до: <code>{date_str}</code>\n"
-        f"Лимит устройств: <code>3</code>\n"
-        f"Ваш баланс: <code>{balance}</code></blockquote>"
-        
+        '<tg-emoji emoji-id="5994750571041525522">👋</tg-emoji><b>Добро пожаловать в Скорость от TgPay</b>\n\n'
+        '<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Быстрый и стабильный VPN\n'
+        '<tg-emoji emoji-id="5985479497586053461">🗺</tg-emoji> Работает в любой точке мира\n'
+        '<tg-emoji emoji-id="5865981429963296202">📱</tg-emoji> Поддержка iPhone, Android, Windows, Mac\n'
+        f"<blockquote><tg-emoji emoji-id='6043896193887506430'>📌</tg-emoji> Ваша подписка: <code>{status}</code>\n"
+        f"<tg-emoji emoji-id='5967382867632722656'>📅</tg-emoji>Действует до: <code>{date_str}</code>\n<tg-emoji emoji-id='5769126056262898415'>👛</tg-emoji>Ваш баланс: <code>{balance}₽</code></blockquote>\n\n"
+        'Выберите действие ниже <tg-emoji emoji-id="5231102735817918643">👇</tg-emoji>'
     )
     buttons = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text='Управление подпиской', callback_data='settings', icon_custom_emoji_id='6032742198179532882')],
+        [InlineKeyboardButton(text='Купить ключ', callback_data='extend', icon_custom_emoji_id='5927169041595634481'),
+         InlineKeyboardButton(text='Пробный ключ', callback_data='trial_key', icon_custom_emoji_id='6005570495603282482')],
         [InlineKeyboardButton(text='Пополнить баланс', callback_data='balance_0', icon_custom_emoji_id='5769126056262898415')],
-        [InlineKeyboardButton(text='Реферальная система', callback_data='referral', icon_custom_emoji_id='6033125983572201397')],
-        [InlineKeyboardButton(text='Продлить', callback_data='extend', icon_custom_emoji_id='5769126056262898415'),
-         InlineKeyboardButton(text='Поддержка', callback_data='support', icon_custom_emoji_id='6030329749409108167')],
-        [InlineKeyboardButton(text='Что это?', callback_data='about', icon_custom_emoji_id='6032594876506312598')]
+        [InlineKeyboardButton(text='Моя подписка', callback_data='settings', icon_custom_emoji_id='5258096772776991776'),
+         InlineKeyboardButton(text='Рефералы', callback_data='referral', icon_custom_emoji_id='5944970130554359187')],
+        [InlineKeyboardButton(text='Новости', url=CHANNEL_URL, icon_custom_emoji_id='6021418126061605425'),
+         InlineKeyboardButton(text='Помощь', callback_data='support', icon_custom_emoji_id='5873121512445187130')],
+        [InlineKeyboardButton(text='Правила', callback_data='policy', icon_custom_emoji_id='5956561916573782596')],
     ])
     photo = FSInputFile('menu.png')
     if isinstance(target, CallbackQuery):
@@ -552,6 +553,7 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
         buttons = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text='СБП', callback_data=f'pay_{summ}_sbp', icon_custom_emoji_id='5425008221330880308')],
             [InlineKeyboardButton(text='Крипта', callback_data=f'pay_{summ}_crypto', icon_custom_emoji_id='5195308461193182892')],
+            [InlineKeyboardButton(text='Картой', callback_data=f'pay_{summ}_card', icon_custom_emoji_id='5927169041595634481')],
             [back_menu_btn()[0]]
         ])
         await edit_or_answer(callback, text, reply_markup=buttons)
@@ -609,6 +611,17 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             await state.update_data(method=method)
             await state.set_state(States.summ)
             await edit_or_answer(callback, '<tg-emoji emoji-id="5904359114531675993">💰</tg-emoji> Введите сумму пополнения:')
+        elif method == 'card':
+            await state.update_data(summ=summ)
+            await state.set_state(States.pay_receipt)
+            await edit_or_answer(
+                callback,
+                f'<tg-emoji emoji-id="5927169041595634481">💳</tg-emoji> <b>Оплата картой</b>\n\n'
+                f'Переведите <b>{summ}₽</b> на карту:\n\n'
+                f'<code>{card}</code>\n\n'
+                f'После оплаты пришлите скриншот чека сюда.',
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_btn(f'balance_{summ}')[0]]]),
+            )
         elif method in ('sbp', 'crypto'):
             from platega import METHOD_SBP, METHOD_CRYPTO
             pm = METHOD_SBP if method == 'sbp' else METHOD_CRYPTO
@@ -698,9 +711,50 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
         await edit_or_answer(
             callback,
             text,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='Политика Конфиденциальности', icon_custom_emoji_id="6037397706505195857", url='https://telegra.ph/Politika-konfidencialnosti-servisa-Fish-VPN-05-03')],
-                                                               [InlineKeyboardButton(text='Пользовательское соглашение', icon_custom_emoji_id="6039422865189638057", url='https://telegra.ph/Polzovatelskoe-soglashenie-servisa-Fish-VPN-05-03')],
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='Политика Конфиденциальности', icon_custom_emoji_id="6037397706505195857", url='https://telegra.ph/Politika-konfidencialnosti-servisa-Skorost-ot-TgPay-05-19')],
+                                                               [InlineKeyboardButton(text='Пользовательское соглашение', icon_custom_emoji_id="6039422865189638057", url='https://telegra.ph/Polzovatelskoe-soglashenie-servisa-Skorost-ot-TgPay-05-19')],
                                                                [back_menu_btn()[0]]])
+        )
+
+    elif data == 'trial_key':
+        is_active, end_date = await get_user_sub(user.id)
+        if is_active and end_date:
+            date_str = end_date.strftime("%d.%m.%Y")
+            text = (
+                f"📍Главное меню » <b>🔑 Пробный ключ</b>\n\n"
+                f"У вас уже есть активная подписка до <code>{date_str}</code>.\n\n"
+                "Нажмите «Подключиться», чтобы получить ключ для вашего устройства."
+            )
+            buttons = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text='🔗 Подключиться к VPN', callback_data='connect')],
+                [back_menu_btn()[0]]
+            ])
+        else:
+            text = (
+                "📍Главное меню » <b>🔑 Пробный ключ</b>\n\n"
+                "<tg-emoji emoji-id='5890925363067886150'>✨</tg-emoji> Новым пользователям мы предоставляем <b>3 дня бесплатного доступа</b>!\n\n"
+                "Если у вас нет активной подписки — пополните баланс и оформите тариф, "
+                "либо воспользуйтесь пробным периодом при первом входе в бот."
+            )
+            buttons = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text='🛒 Купить подписку', callback_data='extend')],
+                [back_menu_btn()[0]]
+            ])
+        await edit_or_answer(callback, text, reply_markup=buttons)
+
+    elif data == 'policy':
+        text = (
+            "📍Главное меню » <b>📄 Политика</b>\n\n"
+            "Ознакомьтесь с нашими документами:"
+        )
+        await edit_or_answer(
+            callback,
+            text,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text='Политика конфиденциальности', icon_custom_emoji_id="6037397706505195857", url='https://telegra.ph/Politika-konfidencialnosti-servisa-Skorost-ot-TgPay-05-19')],
+                [InlineKeyboardButton(text='Пользовательское соглашение', icon_custom_emoji_id="6039422865189638057", url='https://telegra.ph/Polzovatelskoe-soglashenie-servisa-Skorost-ot-TgPay-05-19')],
+                [back_menu_btn()[0]]
+            ])
         )
 
     elif str(user.id) in admins:
@@ -963,6 +1017,17 @@ async def summ_handler(message: Message, state: FSMContext):
     summ = int(message.text)
     fsm_data = await state.get_data()
     method = fsm_data['method']
+    if method == 'card':
+        await state.update_data(summ=summ)
+        await state.set_state(States.pay_receipt)
+        await message.answer(
+            f'💳 <b>Оплата картой</b>\n\n'
+            f'Переведите <b>{summ}₽</b> на карту:\n\n'
+            f'<code>{card}</code>\n\n'
+            f'После оплаты пришлите скриншот чека сюда.',
+            parse_mode='HTML'
+        )
+        return
     await state.clear()
     from platega import METHOD_SBP, METHOD_CRYPTO
     pm = METHOD_SBP if method == 'sbp' else METHOD_CRYPTO

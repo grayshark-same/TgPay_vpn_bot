@@ -1,1 +1,1 @@
-# fish_vpn_bot
+# tgpay_vpn_bot
