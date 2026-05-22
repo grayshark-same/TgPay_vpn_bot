@@ -75,7 +75,7 @@ with sqlite3.connect(REPORTS_DB) as db:
 init_vpn_db()
 
 bot_balance = 0
-plans = {1: 199, 3: 499, 6: 899, 12: 1499}
+plans = {1: 360, 3: 960, 6: 1790, 12: 2990}
 plan_days_map = {1: 30, 3: 90, 6: 180, 12: 360}
 plan_names = {1: '1 месяц', 3: '3 месяца', 6: '6 месяцев', 12: '⚡️12 месяцев'}
 
@@ -126,7 +126,7 @@ CHANNEL_ID = os.getenv('CHANNEL_ID')
 CHANNEL_URL = os.getenv('CHANNEL_URL')
 
 _sub_required_text = (
-    '<tg-emoji emoji-id="6021418126061605425">📢</tg-emoji>  Для использования бота подпишитесь на <a href="http://t.me/FishVPN_info">наш канал</a>.\n\n'
+    f'<tg-emoji emoji-id="6021418126061605425">📢</tg-emoji>  Для использования бота подпишитесь на <a href="{CHANNEL_URL}">наш канал</a>.\n\n'
     'После подписки нажмите «<b><tg-emoji emoji-id="5774022692642492953">✅</tg-emoji> Я подписался</b>».'
 )
 _sub_required_markup = InlineKeyboardMarkup(inline_keyboard=[
@@ -266,6 +266,54 @@ async def poll_transaction(transaction_id: str, tg_id: int, summ: int):
                 pass
             return
         elif status in ('CANCELED', 'CHARGEBACKED'):
+            try:
+                await bot.send_message(tg_id, '❌ Платёж отменён.')
+            except Exception:
+                pass
+            return
+
+
+async def poll_nicepay(payment_id: str, tg_id: int, summ: int):
+    import asyncio
+    from payments import check_nicepay_payment
+    for _ in range(90):  # 90 * 10s = 15 минут
+        await asyncio.sleep(10)
+        data = await check_nicepay_payment(payment_id)
+        status = data.get('data', {}).get('status') if data else None
+        if status == 'success':
+            await add_balance(tg_id=tg_id, summ=summ)
+            await add_report(money=summ)
+            await _archive_topup(tg_id, summ, provider="NicePay")
+            ref_id = await get_ref_id(tg_id)
+            if ref_id:
+                user_info = await get_user_info(tg_id)
+                uname = f"@{user_info[1]}" if user_info and user_info[1] else f"ID {tg_id}"
+                *_, ref_procent = await get_ref_info(ref_id)
+                if ref_procent > 0:
+                    reward = int(summ * ref_procent / 100)
+                    if reward > 0:
+                        await add_ref_balance(ref_id, reward)
+                    try:
+                        await bot.send_message(
+                            ref_id,
+                            f'<tg-emoji emoji-id="5890848474563352982">🪙</tg-emoji> <b>Реферальная комиссия!</b>\n\n'
+                            f'Ваш реферал {uname} пополнил баланс на <code>{summ}</code> ₽\n'
+                            f'Ваша комиссия ({ref_procent}%): <code>{reward}</code> ₽',
+                            parse_mode='HTML'
+                        )
+                    except Exception:
+                        pass
+            try:
+                await bot.send_message(
+                    tg_id,
+                    f'<tg-emoji emoji-id="5774022692642492953">✅</tg-emoji> Ваш баланс пополнен на <code>{summ}₽</code>!',
+                    parse_mode='HTML',
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_menu_btn()[0]]])
+                )
+            except Exception:
+                pass
+            return
+        elif status in ('failed', 'cancelled'):
             try:
                 await bot.send_message(tg_id, '❌ Платёж отменён.')
             except Exception:
@@ -612,31 +660,56 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             await state.set_state(States.summ)
             await edit_or_answer(callback, '<tg-emoji emoji-id="5904359114531675993">💰</tg-emoji> Введите сумму пополнения:')
         elif method == 'card':
-            await state.update_data(summ=summ)
-            await state.set_state(States.pay_receipt)
-            await edit_or_answer(
-                callback,
-                f'<tg-emoji emoji-id="5927169041595634481">💳</tg-emoji> <b>Оплата картой</b>\n\n'
-                f'Переведите <b>{summ}₽</b> на карту:\n\n'
-                f'<code>{card}</code>\n\n'
-                f'После оплаты пришлите скриншот чека сюда.',
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_btn(f'balance_{summ}')[0]]]),
-            )
-        elif method in ('sbp', 'crypto'):
-            from platega import METHOD_SBP, METHOD_CRYPTO
-            pm = METHOD_SBP if method == 'sbp' else METHOD_CRYPTO
-            method_label = 'СБП' if method == 'sbp' else 'Крипта'
-            transaction = await create_platega_transaction(summ, user.id, pm)
+            from payments import create_nicepay_payment, check_nicepay_payment
+            payment = await create_nicepay_payment(summ, user.id, user.username)
+            pay_url = payment.get('data', {}).get('link') if payment else None
+            payment_id = payment.get('data', {}).get('payment_id') if payment else None
+            if pay_url and payment_id:
+                import asyncio
+                asyncio.create_task(poll_nicepay(payment_id, user.id, summ))
+                await edit_or_answer(
+                    callback,
+                    f'<tg-emoji emoji-id="5927169041595634481">💳</tg-emoji> <b>Оплата картой</b>\n\n'
+                    f'Нажмите кнопку ниже для оплаты <b>{summ}₽</b>:\n\n'
+                    f'<tg-emoji emoji-id="5778647930038653243">✨</tg-emoji> Ссылка действительна 15 минут.',
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text=f'💳 Оплатить {summ}₽', url=pay_url, icon_custom_emoji_id='5927169041595634481')],
+                        [back_btn(f'balance_{summ}')[0]]
+                    ])
+                )
+            else:
+                await callback.answer("❌ Ошибка создания платежа. Попробуйте позже.", show_alert=True)
+        elif method == 'crypto':
+            from payments import create_cryptomus_payment
+            payment = await create_cryptomus_payment(summ, user.id, user.username)
+            pay_url = payment.get('url') if payment else None
+            if pay_url:
+                await edit_or_answer(
+                    callback,
+                    f'<tg-emoji emoji-id="5195308461193182892">🪙</tg-emoji> <b>Оплата криптой</b>\n\n'
+                    f'Нажмите кнопку ниже для оплаты <b>{summ}₽</b> в крипте.\n\n'
+                    f'После оплаты баланс пополнится автоматически.',
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text=f'🪙 Оплатить {summ}₽', url=pay_url, icon_custom_emoji_id='5195308461193182892')],
+                        [back_btn(f'balance_{summ}')[0]]
+                    ])
+                )
+            else:
+                await callback.answer("❌ Ошибка создания платежа. Попробуйте позже.", show_alert=True)
+        elif method == 'sbp':
+            from platega import METHOD_SBP
+            transaction = await create_platega_transaction(summ, user.id, METHOD_SBP)
             pay_url = (transaction.get('url') or transaction.get('redirect')) if transaction else None
             if pay_url:
                 import asyncio
                 asyncio.create_task(poll_transaction(transaction['transactionId'], user.id, summ))
                 await edit_or_answer(
                     callback,
-                    f'<tg-emoji emoji-id="5904359114531675993">💰</tg-emoji> Нажмите кнопку ниже для оплаты <b>{summ}₽</b> через <b>{method_label}</b>:\n\n'
+                    f'<tg-emoji emoji-id="5425008221330880308">🏦</tg-emoji> <b>Оплата СБП</b>\n\n'
+                    f'Нажмите кнопку ниже для оплаты <b>{summ}₽</b>:\n\n'
                     f'<tg-emoji emoji-id="5778647930038653243">✨</tg-emoji> Ссылка действительна 15 минут.',
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text=f'Оплатить {summ}₽', url=pay_url, icon_custom_emoji_id='5425008221330880308' if method == 'sbp' else '5195308461193182892')],
+                        [InlineKeyboardButton(text=f'Оплатить {summ}₽', url=pay_url, icon_custom_emoji_id='5425008221330880308')],
                         [back_btn(f'balance_{summ}')[0]]
                     ])
                 )
@@ -901,7 +974,7 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             wb.save(buf)
             buf.seek(0)
             await callback.message.answer_document(
-                BufferedInputFile(buf.read(), filename='fishvpn_db.xlsx'),
+                BufferedInputFile(buf.read(), filename='vpn_db.xlsx'),
                 caption=f'📊 Выгрузка БД\n👥 Пользователей: {n_users}'
             )
             await callback.answer()

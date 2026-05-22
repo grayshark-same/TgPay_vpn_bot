@@ -665,11 +665,14 @@ async def handle_health(_: web.Request) -> web.Response:
 
 
 async def start_subscription_server() -> web.AppRunner:
+    from webhook import nicepay_webhook, cryptomus_webhook
     init_vpn_db()
     app = web.Application()
     app.router.add_get("/sub/{token}", handle_subscription)
     app.router.add_get("/redirect", handle_redirect)
     app.router.add_get("/health", handle_health)
+    app.router.add_get("/nicepay", nicepay_webhook)
+    app.router.add_post("/cryptomus", cryptomus_webhook)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", SUB_PORT)
