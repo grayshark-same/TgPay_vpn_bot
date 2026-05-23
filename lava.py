@@ -73,7 +73,8 @@ async def check_lava_status(order_id: str) -> str | None:
                 data = await resp.json()
                 print(f"[Lava] status response {resp.status}: {data}")
                 if resp.status == 200:
-                    return data.get("data", {}).get("status")
+                    code = data.get("data", {}).get("status")
+                    return {1: "waiting", 2: "success", 3: "cancel", 4: "expired"}.get(code)
     except Exception as e:
         print(f"[Lava] check status error: {e}")
     return None
