@@ -10,7 +10,7 @@ from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, C
 from aiogram.utils.deep_linking import create_start_link, decode_payload
 from dotenv import load_dotenv
 from requests import *
-from platega import create_platega_transaction, check_platega_status
+from lava import create_lava_invoice, check_lava_status
 from vpn import (
     ensure_vpn_account,
     get_happ_activation_url,
@@ -72,7 +72,34 @@ with sqlite3.connect(REPORTS_DB) as db:
                         transactions INTEGER,
                         users INTEGER
                    )''')
+with sqlite3.connect(USERS_DB) as db:
+    db.execute('''CREATE TABLE IF NOT EXISTS pending_payments (
+        order_id TEXT PRIMARY KEY,
+        tg_id INTEGER NOT NULL,
+        summ INTEGER NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )''')
 init_vpn_db()
+
+
+def save_pending_payment(order_id: str, tg_id: int, summ: int):
+    with sqlite3.connect(USERS_DB) as db:
+        db.execute(
+            "INSERT OR IGNORE INTO pending_payments (order_id, tg_id, summ) VALUES (?, ?, ?)",
+            (order_id, tg_id, summ)
+        )
+
+
+def remove_pending_payment(order_id: str):
+    with sqlite3.connect(USERS_DB) as db:
+        db.execute("DELETE FROM pending_payments WHERE order_id = ?", (order_id,))
+
+
+def get_all_pending_payments():
+    with sqlite3.connect(USERS_DB) as db:
+        cur = db.cursor()
+        cur.execute("SELECT order_id, tg_id, summ, created_at FROM pending_payments")
+        return cur.fetchall()
 
 bot_balance = 0
 plans = {1: 360, 3: 960, 6: 1790, 12: 2990}
@@ -225,52 +252,68 @@ async def _archive_purchase(tg_id: int, summ: int, plan: int, username: str | No
         print(f'[archive] purchase error: {e}')
 
 
-async def poll_transaction(transaction_id: str, tg_id: int, summ: int):
-    import asyncio
-    for _ in range(90):  # 90 * 10s = 15 минут
-        await asyncio.sleep(10)
-        status = await check_platega_status(transaction_id)
-        if status == 'CONFIRMED':
-            await add_balance(tg_id=tg_id, summ=summ)
-            await add_report(money=summ)
-            await _archive_topup(tg_id, summ)
-            ref_id = await get_ref_id(tg_id)
-            if ref_id:
-                user_info = await get_user_info(tg_id)
-                uname = f"@{user_info[1]}" if user_info and user_info[1] else f"ID {tg_id}"
-                *_, ref_procent = await get_ref_info(ref_id)
-                if ref_procent > 0:
-                    reward = int(summ * ref_procent / 100)
-                    if reward > 0:
-                        await add_ref_balance(ref_id, reward)
-                    try:
-                        await bot.send_message(
-                            ref_id,
-                            f'<tg-emoji emoji-id="5890848474563352982">🪙</tg-emoji> <b>Реферальная комиссия!</b>\n\n'
-                            f'<tg-emoji emoji-id="6033108709213736873">➕</tg-emoji> Ваш реферал {uname}\n'
-                            f'<tg-emoji emoji-id="5258204546391351475">💰</tg-emoji> Пополнил баланс на <code>{summ}</code> ₽\n\n'
-                            f'<tg-emoji emoji-id="5805298713211447980">🎁</tg-emoji> Ваша комиссия ({ref_procent}%): <code>{reward}</code> ₽\n\n'
-                            f'<tg-emoji emoji-id="5836907383292436018">💎</tg-emoji> Средства зачислены на ваш баланс.',
-                            parse_mode='HTML'
-                        )
-                    except Exception:
-                        pass
+async def _handle_confirmed_payment(order_id: str, tg_id: int, summ: int):
+    remove_pending_payment(order_id)
+    await add_balance(tg_id=tg_id, summ=summ)
+    await add_report(money=summ)
+    await _archive_topup(tg_id, summ)
+    ref_id = await get_ref_id(tg_id)
+    if ref_id:
+        user_info = await get_user_info(tg_id)
+        uname = f"@{user_info[1]}" if user_info and user_info[1] else f"ID {tg_id}"
+        *_, ref_procent = await get_ref_info(ref_id)
+        if ref_procent > 0:
+            reward = int(summ * ref_procent / 100)
+            if reward > 0:
+                await add_ref_balance(ref_id, reward)
             try:
                 await bot.send_message(
-                    tg_id,
-                    f'<tg-emoji emoji-id="5774022692642492953">✅</tg-emoji> Ваш баланс пополнен на <code>{summ}₽</code>!',
-                    parse_mode='HTML',
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_menu_btn()[0]]])
+                    ref_id,
+                    f'<tg-emoji emoji-id="5890848474563352982">🪙</tg-emoji> <b>Реферальная комиссия!</b>\n\n'
+                    f'<tg-emoji emoji-id="6033108709213736873">➕</tg-emoji> Ваш реферал {uname}\n'
+                    f'<tg-emoji emoji-id="5258204546391351475">💰</tg-emoji> Пополнил баланс на <code>{summ}</code> ₽\n\n'
+                    f'<tg-emoji emoji-id="5805298713211447980">🎁</tg-emoji> Ваша комиссия ({ref_procent}%): <code>{reward}</code> ₽\n\n'
+                    f'<tg-emoji emoji-id="5836907383292436018">💎</tg-emoji> Средства зачислены на ваш баланс.',
+                    parse_mode='HTML'
                 )
             except Exception:
                 pass
-            return
-        elif status in ('CANCELED', 'CHARGEBACKED'):
-            try:
-                await bot.send_message(tg_id, '❌ Платёж отменён.')
-            except Exception:
-                pass
-            return
+    try:
+        await bot.send_message(
+            tg_id,
+            f'<tg-emoji emoji-id="5774022692642492953">✅</tg-emoji> Ваш баланс пополнен на <code>{summ}₽</code>!',
+            parse_mode='HTML',
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_menu_btn()[0]]])
+        )
+    except Exception:
+        pass
+
+
+async def payment_checker_loop():
+    import asyncio
+    while True:
+        await asyncio.sleep(5)
+        try:
+            payments = get_all_pending_payments()
+            for order_id, tg_id, summ, created_at in payments:
+                try:
+                    created = datetime.datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S")
+                    if (datetime.datetime.now() - created).total_seconds() > 3600:
+                        remove_pending_payment(order_id)
+                        continue
+                    status = await check_lava_status(order_id)
+                    if status == 'success':
+                        await _handle_confirmed_payment(order_id, tg_id, summ)
+                    elif status in ('expired', 'cancel'):
+                        remove_pending_payment(order_id)
+                        try:
+                            await bot.send_message(tg_id, '❌ Платёж отменён.')
+                        except Exception:
+                            pass
+                except Exception as e:
+                    print(f'[payment checker] order {order_id} error: {e}')
+        except Exception as e:
+            print(f'[payment checker loop ERROR] {type(e).__name__}: {e}')
 
 
 async def poll_nicepay(payment_id: str, tg_id: int, summ: int):
@@ -660,6 +703,7 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             await state.set_state(States.summ)
             await edit_or_answer(callback, '<tg-emoji emoji-id="5904359114531675993">💰</tg-emoji> Введите сумму пополнения:')
         elif method == 'card':
+<<<<<<< HEAD
             from payments import create_nicepay_payment, check_nicepay_payment
             payment = await create_nicepay_payment(summ, user.id, user.username)
             pay_url = payment.get('data', {}).get('link') if payment else None
@@ -700,9 +744,26 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             from platega import METHOD_SBP
             transaction = await create_platega_transaction(summ, user.id, METHOD_SBP)
             pay_url = (transaction.get('url') or transaction.get('redirect')) if transaction else None
+=======
+            await state.update_data(summ=summ)
+            await state.set_state(States.pay_receipt)
+            await edit_or_answer(
+                callback,
+                f'<tg-emoji emoji-id="5927169041595634481">💳</tg-emoji> <b>Оплата картой</b>\n\n'
+                f'Переведите <b>{summ}₽</b> на карту:\n\n'
+                f'<code>{card}</code>\n\n'
+                f'После оплаты пришлите скриншот чека сюда.',
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_btn(f'balance_{summ}')[0]]]),
+            )
+        elif method in ('sbp', 'crypto'):
+            import uuid
+            method_label = 'СБП' if method == 'sbp' else 'Крипта'
+            order_id = str(uuid.uuid4())
+            invoice = await create_lava_invoice(summ, order_id, user.id)
+            pay_url = invoice.get('data', {}).get('url') if invoice else None
+>>>>>>> e13e893 (add lava)
             if pay_url:
-                import asyncio
-                asyncio.create_task(poll_transaction(transaction['transactionId'], user.id, summ))
+                save_pending_payment(order_id, user.id, summ)
                 await edit_or_answer(
                     callback,
                     f'<tg-emoji emoji-id="5425008221330880308">🏦</tg-emoji> <b>Оплата СБП</b>\n\n'
@@ -1102,15 +1163,13 @@ async def summ_handler(message: Message, state: FSMContext):
         )
         return
     await state.clear()
-    from platega import METHOD_SBP, METHOD_CRYPTO
-    pm = METHOD_SBP if method == 'sbp' else METHOD_CRYPTO
+    import uuid
     method_label = 'СБП' if method == 'sbp' else 'Крипта'
-    method_emoji = '🏦' if method == 'sbp' else '₿'
-    transaction = await create_platega_transaction(summ, message.from_user.id, pm)
-    pay_url = (transaction.get('url') or transaction.get('redirect')) if transaction else None
+    order_id = str(uuid.uuid4())
+    invoice = await create_lava_invoice(summ, order_id, message.from_user.id)
+    pay_url = invoice.get('data', {}).get('url') if invoice else None
     if pay_url:
-        import asyncio
-        asyncio.create_task(poll_transaction(transaction['transactionId'], message.from_user.id, summ))
+        save_pending_payment(order_id, message.from_user.id, summ)
         await message.answer(
             f'<tg-emoji emoji-id="5904359114531675993">💰</tg-emoji> Нажмите кнопку ниже для оплаты <b>{summ}₽</b> через <b>{method_label}</b>:\n\n'
             f'<tg-emoji emoji-id="5778647930038653243">✨</tg-emoji> Ссылка действительна 15 минут.',
@@ -1414,6 +1473,7 @@ async def on_startup(*args, **kwargs):
     import asyncio
     await start_subscription_server()
     asyncio.create_task(expiry_reminder_loop())
+    asyncio.create_task(payment_checker_loop())
 
 
 dp.startup.register(on_startup)
