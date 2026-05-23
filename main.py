@@ -305,6 +305,7 @@ async def payment_checker_loop():
                     if (datetime.datetime.now() - created).total_seconds() > 3600:
                         remove_pending_payment(order_id)
                         continue
+                    print(f"[payment checker] calling check for order={order_id}")
                     status = await check_lava_status(order_id)
                     print(f"[payment checker] order={order_id} tg_id={tg_id} status={status}")
                     if status == 'success':
@@ -315,8 +316,8 @@ async def payment_checker_loop():
                             await bot.send_message(tg_id, '❌ Платёж отменён.')
                         except Exception:
                             pass
-                except Exception as e:
-                    print(f'[payment checker] order {order_id} error: {e}')
+                except BaseException as e:
+                    print(f'[payment checker] order {order_id} error: {type(e).__name__}: {e}')
         except Exception as e:
             print(f'[payment checker loop ERROR] {type(e).__name__}: {e}')
 
