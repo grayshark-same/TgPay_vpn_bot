@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: DockerFile
-    container_name: fish-vpn-bot
+    container_name: tgp-vpn-bot
     env_file: .env
     restart: unless-stopped
     ports:
