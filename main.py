@@ -88,6 +88,7 @@ def save_pending_payment(order_id: str, tg_id: int, summ: int):
             "INSERT OR IGNORE INTO pending_payments (order_id, tg_id, summ) VALUES (?, ?, ?)",
             (order_id, tg_id, summ)
         )
+    print(f"[payment] saved: order={order_id} tg_id={tg_id} summ={summ} db={USERS_DB}")
 
 
 def remove_pending_payment(order_id: str):
@@ -291,10 +292,13 @@ async def _handle_confirmed_payment(order_id: str, tg_id: int, summ: int):
 
 async def payment_checker_loop():
     import asyncio
+    print("[payment checker] loop started")
     while True:
         await asyncio.sleep(5)
         try:
             payments = get_all_pending_payments()
+            if payments:
+                print(f"[payment checker] tick: {len(payments)} pending")
             for order_id, tg_id, summ, created_at in payments:
                 try:
                     created = datetime.datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S")
