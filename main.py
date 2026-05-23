@@ -302,6 +302,7 @@ async def payment_checker_loop():
                         remove_pending_payment(order_id)
                         continue
                     status = await check_lava_status(order_id)
+                    print(f"[payment checker] order={order_id} tg_id={tg_id} status={status}")
                     if status == 'success':
                         await _handle_confirmed_payment(order_id, tg_id, summ)
                     elif status in ('expired', 'cancel'):

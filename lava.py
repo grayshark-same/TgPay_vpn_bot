@@ -70,8 +70,9 @@ async def check_lava_status(order_id: str) -> str | None:
                 },
                 data=json_data.encode(),
             ) as resp:
+                data = await resp.json()
+                print(f"[Lava] status response {resp.status}: {data}")
                 if resp.status == 200:
-                    data = await resp.json()
                     return data.get("data", {}).get("status")
     except Exception as e:
         print(f"[Lava] check status error: {e}")
