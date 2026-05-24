@@ -359,6 +359,15 @@ async def start_handler(message: Message):
             parse_mode='HTML'
         )
 
+@dp.message(Command('test_archive'))
+async def test_archive_command(message: Message):
+    if str(message.from_user.id) not in admins:
+        return
+    try:
+        r = await bot.send_message(ARCHIVE_CHAT_ID, '✅ Тест архива работает!')
+        await message.answer(f'✅ Сообщение отправлено, message_id: {r.message_id}')
+    except Exception as e:
+        await message.answer(f'❌ Ошибка: {e}')
 
 
 
