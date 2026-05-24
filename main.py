@@ -123,6 +123,7 @@ admin_return_button = InlineKeyboardMarkup(inline_keyboard=[
 class States(StatesGroup):
     summ = State()
     pay_receipt = State()
+    crypto_txid = State()
     # pay_way = State()
     newsletter_text = State()
     newsletter_photo = State()
@@ -703,22 +704,26 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             else:
                 await callback.answer("❌ Ошибка создания платежа. Попробуйте позже.", show_alert=True)
         elif method == 'crypto':
-            from payments import create_cryptomus_payment
-            result = await create_cryptomus_payment(summ, user.id, user.username or '')
-            pay_url = result.get('result', {}).get('url') if result else None
-            if pay_url:
-                await edit_or_answer(
-                    callback,
-                    f'<tg-emoji emoji-id="5195308461193182892">🪙</tg-emoji> <b>Оплата криптовалютой</b>\n\n'
-                    f'Нажмите кнопку ниже для оплаты <b>{summ}₽</b> через Cryptomus:\n\n'
-                    f'<tg-emoji emoji-id="5778647930038653243">✨</tg-emoji> Ссылка действительна 1 час.',
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text=f'Оплатить {summ}₽', url=pay_url, icon_custom_emoji_id='5195308461193182892')],
-                        [back_btn(f'balance_{summ}')[0]]
-                    ])
-                )
-            else:
-                await callback.answer("❌ Ошибка создания платежа. Попробуйте позже.", show_alert=True)
+            import aiohttp
+            usdt_wallet = os.getenv('USDT_WALLET', '')
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get('https://api.binance.com/api/v3/ticker/price?symbol=USDTRUB') as r:
+                        kurs = float((await r.json())['price'])
+            except Exception:
+                kurs = 90.0
+            summ_usdt = round(summ / kurs, 2)
+            await state.update_data(summ=summ)
+            await state.set_state(States.crypto_txid)
+            await callback.message.delete()
+            await callback.message.answer(
+                f'<tg-emoji emoji-id="5195308461193182892">🪙</tg-emoji> <b>Оплата USDT (TRC-20)</b>\n\n'
+                f'Переведите <code>{summ_usdt}</code> USDT на адрес:\n\n'
+                f'<code>{usdt_wallet}</code>\n\n'
+                f'После оплаты пришлите TxID транзакции сюда.',
+                parse_mode='HTML',
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_btn(f'balance_{summ}')[0]]])
+            )
         else:
             await callback.answer("Метод оплаты недоступен.", show_alert=True)
 
@@ -1105,20 +1110,39 @@ async def summ_handler(message: Message, state: FSMContext):
             parse_mode='HTML'
         )
         return
+    if method == 'crypto':
+        import aiohttp
+        usdt_wallet = os.getenv('USDT_WALLET', '')
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get('https://api.binance.com/api/v3/ticker/price?symbol=USDTRUB') as r:
+                    kurs = float((await r.json())['price'])
+        except Exception:
+            kurs = 90.0
+        summ_usdt = round(summ / kurs, 2)
+        await state.update_data(summ=summ)
+        await state.set_state(States.crypto_txid)
+        await message.answer(
+            f'<tg-emoji emoji-id="5195308461193182892">🪙</tg-emoji> <b>Оплата USDT (TRC-20)</b>\n\n'
+            f'Переведите <code>{summ_usdt}</code> USDT на адрес:\n\n'
+            f'<code>{usdt_wallet}</code>\n\n'
+            f'После оплаты пришлите TxID транзакции сюда.',
+            parse_mode='HTML'
+        )
+        return
     await state.clear()
     import uuid
-    method_label = 'СБП' if method == 'sbp' else 'Крипта'
     order_id = str(uuid.uuid4())
     invoice = await create_lava_invoice(summ, order_id, message.from_user.id)
     pay_url = invoice.get('data', {}).get('url') if invoice else None
     if pay_url:
         save_pending_payment(order_id, message.from_user.id, summ)
         await message.answer(
-            f'<tg-emoji emoji-id="5904359114531675993">💰</tg-emoji> Нажмите кнопку ниже для оплаты <b>{summ}₽</b> через <b>{method_label}</b>:\n\n'
+            f'<tg-emoji emoji-id="5904359114531675993">💰</tg-emoji> Нажмите кнопку ниже для оплаты <b>{summ}₽</b> через <b>СБП</b>:\n\n'
             f'<tg-emoji emoji-id="5778647930038653243">✨</tg-emoji> Ссылка действительна 15 минут.',
             parse_mode='HTML',
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text=f'Оплатить {summ}₽', url=pay_url, icon_custom_emoji_id='5425008221330880308' if method == 'sbp' else '5195308461193182892')],
+                [InlineKeyboardButton(text=f'Оплатить {summ}₽', url=pay_url, icon_custom_emoji_id='5425008221330880308')],
                 [back_menu_btn()[0]]
             ])
         )
@@ -1149,6 +1173,32 @@ async def receive_receipt(message: Message, state: FSMContext):
         )
     await state.clear()
     await message.answer("✅ Чек отправлен на проверку. Ожидайте активации.")
+
+
+@dp.message(States.crypto_txid)
+async def receive_crypto_txid(message: Message, state: FSMContext):
+    txid = message.text.strip() if message.text else ''
+    if not txid:
+        await message.answer('Пришлите TxID транзакции.')
+        return
+    fsm_data = await state.get_data()
+    summ = fsm_data.get('summ')
+    buttons = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='✅ Принять', callback_data=f'accept_{summ}_{message.from_user.id}')],
+        [InlineKeyboardButton(text='❌ Отклонить', callback_data=f'decline_{message.from_user.id}')]
+    ])
+    for admin_id in admins:
+        await bot.send_message(
+            chat_id=int(admin_id),
+            text=(f'🪙 <b>Крипта (USDT)</b> от @{message.from_user.username}\n'
+                  f'🆔 ID: <code>{message.from_user.id}</code>\n'
+                  f'💵 Сумма: {summ}₽\n'
+                  f'🔖 TxID: <code>{txid}</code>'),
+            parse_mode='HTML',
+            reply_markup=buttons
+        )
+    await state.clear()
+    await message.answer('✅ TxID отправлен на проверку. Ожидайте зачисления.')
 
 
 @dp.message(States.admin_check_id)
