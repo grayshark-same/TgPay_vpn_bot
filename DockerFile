@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends tzdata \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY main.py requests.py platega.py vpn.py webhook.py payments.py ./
+COPY main.py requests.py lava.py vpn.py webhook.py payments.py ./
 COPY menu.png ./
 
 RUN mkdir -p /app/data
