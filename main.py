@@ -317,7 +317,9 @@ async def payment_checker_loop():
                         except Exception:
                             pass
                 except BaseException as e:
+                    import traceback
                     print(f'[payment checker] order {order_id} error: {type(e).__name__}: {e}')
+                    print(traceback.format_exc())
         except Exception as e:
             print(f'[payment checker loop ERROR] {type(e).__name__}: {e}')
 
