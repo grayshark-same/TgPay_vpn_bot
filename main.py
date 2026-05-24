@@ -681,9 +681,8 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
                 f'После оплаты пришлите скриншот чека сюда.',
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_btn(f'balance_{summ}')[0]]]),
             )
-        elif method in ('sbp', 'crypto'):
+        elif method == 'sbp':
             import uuid
-            method_label = 'СБП' if method == 'sbp' else 'Крипта'
             order_id = str(uuid.uuid4())
             invoice = await create_lava_invoice(summ, order_id, user.id)
             pay_url = invoice.get('data', {}).get('url') if invoice else None
@@ -691,11 +690,28 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
                 save_pending_payment(order_id, user.id, summ)
                 await edit_or_answer(
                     callback,
-                    f'<tg-emoji emoji-id="5425008221330880308">🏦</tg-emoji> <b>Оплата через Lava</b>\n\n'
-                    f'Нажмите кнопку ниже для оплаты <b>{summ}₽</b> через <b>{method_label}</b>:\n\n'
+                    f'<tg-emoji emoji-id="5425008221330880308">🏦</tg-emoji> <b>Оплата через СБП</b>\n\n'
+                    f'Нажмите кнопку ниже для оплаты <b>{summ}₽</b>:\n\n'
                     f'<tg-emoji emoji-id="5778647930038653243">✨</tg-emoji> Ссылка действительна 1 час.',
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text=f'Оплатить {summ}₽', url=pay_url, icon_custom_emoji_id='5425008221330880308' if method == 'sbp' else '5195308461193182892')],
+                        [InlineKeyboardButton(text=f'Оплатить {summ}₽', url=pay_url, icon_custom_emoji_id='5425008221330880308')],
+                        [back_btn(f'balance_{summ}')[0]]
+                    ])
+                )
+            else:
+                await callback.answer("❌ Ошибка создания платежа. Попробуйте позже.", show_alert=True)
+        elif method == 'crypto':
+            from payments import create_cryptomus_payment
+            result = await create_cryptomus_payment(summ, user.id, user.username or '')
+            pay_url = result.get('result', {}).get('url') if result else None
+            if pay_url:
+                await edit_or_answer(
+                    callback,
+                    f'<tg-emoji emoji-id="5195308461193182892">🪙</tg-emoji> <b>Оплата криптовалютой</b>\n\n'
+                    f'Нажмите кнопку ниже для оплаты <b>{summ}₽</b> через Cryptomus:\n\n'
+                    f'<tg-emoji emoji-id="5778647930038653243">✨</tg-emoji> Ссылка действительна 1 час.',
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text=f'Оплатить {summ}₽', url=pay_url, icon_custom_emoji_id='5195308461193182892')],
                         [back_btn(f'balance_{summ}')[0]]
                     ])
                 )
