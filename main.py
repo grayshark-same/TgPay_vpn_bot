@@ -303,7 +303,7 @@ async def payment_checker_loop():
             for order_id, tg_id, summ, created_at in payments:
                 try:
                     created = datetime.datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S")
-                    if (datetime.datetime.now() - created).total_seconds() > 3600:
+                    if (datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) - created).total_seconds() > 3600:
                         remove_pending_payment(order_id)
                         continue
                     print(f"[payment checker] calling check for order={order_id}")
