@@ -380,6 +380,15 @@ async def test_archive_command(message: Message):
 
 
 
+@dp.message(Command('getlink'))
+async def getlink_handler(message: Message):
+    if str(message.from_user.id) not in admins:
+        return
+    me = await bot.get_me()
+    link = f"https://t.me/{me.username}?start=1"
+    await message.answer(f'🔗 Ссылка для запуска бота:\n<code>{link}</code>', parse_mode='HTML')
+
+
 @dp.message(Command('unpin'))
 async def unpin_handler(message: Message):
     if str(message.from_user.id) not in admins:
