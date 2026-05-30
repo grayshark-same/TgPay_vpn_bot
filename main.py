@@ -329,14 +329,11 @@ async def payment_checker_loop():
 @dp.message(Command('start'))
 async def start_handler(message: Message):
     try:
-        msg = await message.answer('​', reply_markup=ReplyKeyboardRemove())
-        await msg.delete()
-    except Exception:
-        pass
-    try:
+        msg = await message.answer('.', reply_markup=ReplyKeyboardRemove())
         await bot.unpin_all_chat_messages(chat_id=message.chat.id)
-    except Exception:
-        pass
+        await msg.delete()
+    except Exception as e:
+        print(f'[start cleanup] {type(e).__name__}: {e}')
     if not await is_subscribed(message.from_user.id):
         await message.answer(
             _sub_required_text,
