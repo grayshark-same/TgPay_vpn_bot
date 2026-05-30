@@ -380,6 +380,17 @@ async def test_archive_command(message: Message):
 
 
 
+@dp.message(Command('unpin'))
+async def unpin_handler(message: Message):
+    if str(message.from_user.id) not in admins:
+        return
+    try:
+        await bot.unpin_all_chat_messages(chat_id=message.chat.id)
+        await message.answer('✅ Все закреплённые сообщения откреплены.')
+    except Exception as e:
+        await message.answer(f'❌ Ошибка: {type(e).__name__}: {e}')
+
+
 @dp.message(Command('restart'))
 async def restart_handler(message: Message):
     if str(message.from_user.id) not in admins:
