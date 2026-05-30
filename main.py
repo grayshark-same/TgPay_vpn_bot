@@ -328,7 +328,11 @@ async def payment_checker_loop():
 
 @dp.message(Command('start'))
 async def start_handler(message: Message):
-    await message.answer('...', reply_markup=ReplyKeyboardRemove())
+    try:
+        msg = await message.answer('​', reply_markup=ReplyKeyboardRemove())
+        await msg.delete()
+    except Exception:
+        pass
     if not await is_subscribed(message.from_user.id):
         await message.answer(
             _sub_required_text,
