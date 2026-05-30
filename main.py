@@ -333,6 +333,10 @@ async def start_handler(message: Message):
         await msg.delete()
     except Exception:
         pass
+    try:
+        await bot.unpin_all_chat_messages(chat_id=message.chat.id)
+    except Exception:
+        pass
     if not await is_subscribed(message.from_user.id):
         await message.answer(
             _sub_required_text,
