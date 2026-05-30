@@ -6,7 +6,7 @@ from aiogram.types import FSInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State, default_state
 from aiogram.filters import Command, StateFilter
-from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
+from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, ReplyKeyboardRemove
 from aiogram.utils.deep_linking import create_start_link, decode_payload
 from dotenv import load_dotenv
 from requests import *
@@ -328,6 +328,7 @@ async def payment_checker_loop():
 
 @dp.message(Command('start'))
 async def start_handler(message: Message):
+    await message.answer('...', reply_markup=ReplyKeyboardRemove())
     if not await is_subscribed(message.from_user.id):
         await message.answer(
             _sub_required_text,
