@@ -155,6 +155,13 @@ async def transfer_ref_balance(tg_id: int) -> int:
         return amount
 
 
+async def get_active_users():
+    with sqlite3.connect(USERS_DB) as db:
+        cur = db.cursor()
+        cur.execute("SELECT tg_id, username, end_of_sub FROM users WHERE end_of_sub IS NOT NULL AND end_of_sub > datetime('now')")
+        return cur.fetchall()
+
+
 async def get_user_info(tg_id: int):
     with sqlite3.connect(USERS_DB) as db:
         cur = db.cursor()

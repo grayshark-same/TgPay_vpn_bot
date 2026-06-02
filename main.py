@@ -400,6 +400,24 @@ async def unpin_handler(message: Message):
         await message.answer(f'❌ Ошибка: {type(e).__name__}: {e}')
 
 
+@dp.message(Command('sync_vpn'))
+async def sync_vpn_handler(message: Message):
+    if str(message.from_user.id) not in admins:
+        return
+    await message.answer('🔄 Синхронизация всех активных пользователей...')
+    users = await get_active_users()
+    ok, fail = 0, 0
+    for tg_id, username, end_of_sub in users:
+        try:
+            end_date = datetime.datetime.strptime(end_of_sub, "%Y-%m-%d %H:%M:%S")
+            await ensure_vpn_account(tg_id, end_date, username)
+            ok += 1
+        except Exception as e:
+            print(f'[sync_vpn] {tg_id}: {e}')
+            fail += 1
+    await message.answer(f'✅ Синхронизировано: <code>{ok}</code>\n❌ Ошибок: <code>{fail}</code>', parse_mode='HTML')
+
+
 @dp.message(Command('restart'))
 async def restart_handler(message: Message):
     if str(message.from_user.id) not in admins:
