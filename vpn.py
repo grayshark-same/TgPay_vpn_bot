@@ -339,14 +339,25 @@ class XuiClient:
                 return {"raw": text}
 
     async def _login(self, session: aiohttp.ClientSession) -> None:
+        import re
         payload = {"username": self.node.username, "password": self.node.password}
+        csrf_token = None
         try:
-            data = await self._request(session, "POST", "/login", json=payload)
+            async with session.get(self.node.panel_url, ssl=self.verify_ssl) as resp:
+                html = await resp.text()
+                m = re.search(r'csrf-token["\s]+content="([^"]+)"', html)
+                if m:
+                    csrf_token = m.group(1)
+        except Exception:
+            pass
+        headers = {"X-Csrf-Token": csrf_token} if csrf_token else {}
+        try:
+            data = await self._request(session, "POST", "/login", json=payload, headers=headers)
             if data.get("success") is not False:
                 return
         except RuntimeError:
             pass
-        data = await self._request(session, "POST", "/login", data=payload)
+        data = await self._request(session, "POST", "/login", data=payload, headers=headers)
         if data.get("success") is False:
             raise RuntimeError(f"{self.node.name}: login failed: {data.get('msg')}")
 
