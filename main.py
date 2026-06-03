@@ -9,6 +9,7 @@ from aiogram.filters import Command, StateFilter
 from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, ReplyKeyboardRemove
 from aiogram.utils.deep_linking import create_start_link, decode_payload
 from dotenv import load_dotenv
+import json
 from requests import *
 from lava import create_lava_invoice, check_lava_status
 from vpn import (
@@ -79,6 +80,17 @@ with sqlite3.connect(USERS_DB) as db:
         summ INTEGER NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )''')
+with sqlite3.connect(USERS_DB) as db:
+    db.execute('''CREATE TABLE IF NOT EXISTS promocodes (
+        code TEXT PRIMARY KEY,
+        owner_id INTEGER NOT NULL,
+        discount INTEGER NOT NULL
+    )''')
+with sqlite3.connect(USERS_DB) as db:
+    db.execute('''CREATE TABLE IF NOT EXISTS user_promos (
+        tg_id INTEGER PRIMARY KEY,
+        code TEXT NOT NULL
+    )''')
 init_vpn_db()
 
 
@@ -113,6 +125,7 @@ admin_panel = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text='Добавить трафера', callback_data='admin_add_trafer')],
     [InlineKeyboardButton(text='Выдать подписку', callback_data='admin_give_sub')],
     [InlineKeyboardButton(text='Выгрузить пользователей', callback_data='export_users')],
+    [InlineKeyboardButton(text='Промокоды', callback_data='promo')],
     [InlineKeyboardButton(text='Рассылка', callback_data='newsletter')]
 ])
 admin_return_button = InlineKeyboardMarkup(inline_keyboard=[
@@ -134,6 +147,10 @@ class States(StatesGroup):
     admin_trafer_id = State()
     admin_trafer_procent = State()
     admin_give_sub_id = State()
+    promo_owner_id = State()
+    promo_code_input = State()
+    promo_discount_input = State()
+    activate_promo_input = State()
 
 # @dp.message(F.photo)
 # async def get_file_id(message: Message):
@@ -204,6 +221,7 @@ async def send_main_menu(target, user_id, username=None):
         [InlineKeyboardButton(text='Пополнить баланс', callback_data='balance_0', icon_custom_emoji_id='5769126056262898415')],
         [InlineKeyboardButton(text='Моя подписка', callback_data='settings', icon_custom_emoji_id='5258096772776991776'),
          InlineKeyboardButton(text='Рефералы', callback_data='referral', icon_custom_emoji_id='5944970130554359187')],
+        [InlineKeyboardButton(text='Активировать промокод', callback_data='activate_promo', icon_custom_emoji_id='5870841386089288161')],
         [InlineKeyboardButton(text='Новости', url=CHANNEL_URL, icon_custom_emoji_id='6021418126061605425'),
          InlineKeyboardButton(text='Помощь', callback_data='support', icon_custom_emoji_id='5873121512445187130')],
         [InlineKeyboardButton(text='Правила', callback_data='policy', icon_custom_emoji_id='5956561916573782596')],
@@ -367,7 +385,8 @@ async def start_handler(message: Message):
             '<blockquote>Нажмите:<b>"</b><b><tg-emoji emoji-id="5850309953293653168">⚙️</tg-emoji></b><b> Управление подпиской"</b> ниже, чтобы мгновенно получить доступ.</blockquote>',
             parse_mode='HTML'
         )
-
+ 
+ 
 @dp.message(Command('test_archive'))
 async def test_archive_command(message: Message):
     if str(message.from_user.id) not in admins:
@@ -493,6 +512,7 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             [back_btn('settings')[0]]
         ])
         await edit_or_answer(callback, text, reply_markup=buttons)
+
 
     elif data.startswith('connect_'):
         platform = data.replace('connect_', '')
@@ -620,13 +640,18 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
     elif data.startswith('plan_'):
         plan = int(data.replace('plan_', ''))
         summ = plans[plan]
+        promo_code = get_user_promo(user.id)
+        promo_info = get_promocode(promo_code) if promo_code else None
+        discount_pct = promo_info[2] if promo_info else 0
+        final_summ = int(summ * (100 - discount_pct) / 100) if discount_pct else summ
+        promo_line = f'\n🎟 Промокод <code>{promo_code}</code>: скидка {discount_pct}%' if discount_pct else ''
         text = (
             f"📍Главное меню » <tg-emoji emoji-id='5258204546391351475'>👛</tg-emoji> Продлить » <b>{plan_names[plan]}</b>\n\n"
             f"<blockquote>⏱️ {plan_days_map[plan]} дней • 3 устройства\n"
-            f"💰 Сумма: {summ}₽</blockquote>\n"
+            f"💰 Сумма: {final_summ}₽{promo_line}</blockquote>\n"
         )
         buttons = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text='Оплатить', callback_data=f'pay_sub_{summ}_{plan}', style='success')],
+        [InlineKeyboardButton(text='Оплатить', callback_data=f'pay_sub_{final_summ}_{plan}', style='success')],
         [back_btn(f'extend')[0]]
         ])
         await edit_or_answer(callback, text, reply_markup=buttons)
@@ -706,6 +731,27 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
                         )
                 except Exception:
                     pass
+            # начислить трафер по промокоду
+            promo_code = get_user_promo(user.id)
+            promo_info = get_promocode(promo_code) if promo_code else None
+            if promo_info:
+                _, promo_owner_id, discount_pct = promo_info
+                *_, owner_procent = await get_ref_info(promo_owner_id)
+                promo_reward = int(summ * (owner_procent - discount_pct) / 100)
+                if promo_reward > 0:
+                    await add_ref_balance(promo_owner_id, promo_reward)
+                    try:
+                        uname = f"@{user.username}" if user.username else f"ID {user.id}"
+                        await bot.send_message(
+                            promo_owner_id,
+                            f'🎟 <b>Покупка по промокоду <code>{promo_code}</code>!</b>\n\n'
+                            f'👤 {uname}\n'
+                            f'💵 Сумма: <code>{summ}₽</code>\n'
+                            f'🪙 Вам начислено <b>{promo_reward}₽</b>',
+                            parse_mode='HTML'
+                        )
+                    except Exception:
+                        pass
             await edit_or_answer(callback, text='✅ Подписка успешно куплена!', reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_menu_btn()[0]]]))
         else:
             await edit_or_answer(callback, text=f'На вашем балансе нехватает <code>{summ - await get_user_balance(user.id)}</code>₽', reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='Пополнить баланс', callback_data=f'balance_{summ}')]]))
@@ -799,8 +845,26 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
         rows = []
         if ref_balance > 0:
             rows.append([InlineKeyboardButton(text=f'💸 Вывести {ref_balance}₽ на основной баланс', callback_data='ref_withdraw')])
+        if ref_procent > 0:
+            rows.append([InlineKeyboardButton(text='🎟 Создать промокод', callback_data='create_promo')])
         rows.append([back_menu_btn()[0]])
         await edit_or_answer(callback, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+
+    elif data == 'create_promo':
+        _, _, ref_procent = await get_ref_info(user.id)
+        if ref_procent <= 0:
+            await callback.answer('❌ Только траферы могут создавать промокоды.', show_alert=True)
+            return
+        await state.set_state(States.promo_code_input)
+        await edit_or_answer(callback, '🎟 <b>Создание промокода</b>\n\nВведите текст промокода (латиница, без пробелов):')
+
+    elif data == 'activate_promo':
+        current = get_user_promo(user.id)
+        if current:
+            await edit_or_answer(callback, f'У вас уже активирован промокод: <code>{current}</code>', reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_menu_btn()[0]]]))
+            return
+        await state.set_state(States.activate_promo_input)
+        await edit_or_answer(callback, '🎟 Введите промокод:')
 
     elif data == 'support':
         text = (
@@ -915,6 +979,24 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
                 reply_markup=admin_panel,
                 parse_mode='HTML'
             )
+
+        elif data == 'promo':
+            text = '''Активные промокоды\n'''
+            buttons = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='Добавить промокод', callback_data='add_promo')],
+                                                            [InlineKeyboardButton(text='Удалить промокод', callback_data='rm_promo')],
+                                                            [back_btn('admin_return')[0]]])
+            try:
+                promos = load_promo()
+                for promo, tg_id in promos.items():
+                    username = get_user_info(tg_id=tg_id)
+                    text = text + f'\n@{username}: {promo}'
+            except:
+                text = '\nНет активных промокодов'
+            print(text)
+            # await callback.message.edit_text()
+        
+        elif data == 'add_promo':
+            text = '👤 Введите ID владельца промокода'
         elif data.startswith('accept_'):
             _, summ, uid = data.split('_')
             summ, uid = int(summ), int(uid)
@@ -1243,6 +1325,58 @@ async def receive_crypto_txid(message: Message, state: FSMContext):
         )
     await state.clear()
     await message.answer('✅ TxID отправлен на проверку. Ожидайте зачисления.')
+
+
+@dp.message(States.promo_code_input)
+async def promo_code_input_handler(message: Message, state: FSMContext):
+    code = message.text.strip().upper()
+    if not code.isalnum():
+        await message.answer('❌ Только буквы и цифры, без пробелов. Попробуйте ещё раз:')
+        return
+    _, _, ref_procent = await get_ref_info(message.from_user.id)
+    if ref_procent <= 0:
+        await state.clear()
+        await message.answer('❌ Только траферы могут создавать промокоды.')
+        return
+    await state.update_data(promo_code=code)
+    await state.set_state(States.promo_discount_input)
+    await message.answer(f'🎟 Промокод: <code>{code}</code>\n\nВведите размер скидки в % (от 1 до {ref_procent - 1}):', parse_mode='HTML')
+
+
+@dp.message(States.promo_discount_input)
+async def promo_discount_input_handler(message: Message, state: FSMContext):
+    _, _, ref_procent = await get_ref_info(message.from_user.id)
+    if not message.text or not message.text.isdigit():
+        await message.answer('❌ Введите целое число:')
+        return
+    discount = int(message.text)
+    if discount < 1 or discount >= ref_procent:
+        await message.answer(f'❌ Скидка должна быть от 1 до {ref_procent - 1}%:')
+        return
+    fsm_data = await state.get_data()
+    code = fsm_data['promo_code']
+    ok = create_promocode(code, message.from_user.id, discount)
+    await state.clear()
+    if ok:
+        await message.answer(f'✅ Промокод <code>{code}</code> создан!\nСкидка: <b>{discount}%</b>\nВаша выплата: <b>{ref_procent - discount}%</b>', parse_mode='HTML')
+    else:
+        await message.answer(f'❌ Промокод <code>{code}</code> уже существует. Придумайте другой.', parse_mode='HTML')
+
+
+@dp.message(States.activate_promo_input)
+async def activate_promo_handler(message: Message, state: FSMContext):
+    code = message.text.strip().upper()
+    promo = get_promocode(code)
+    await state.clear()
+    if not promo:
+        await message.answer('❌ Промокод не найден.')
+        return
+    _, owner_id, discount = promo
+    if owner_id == message.from_user.id:
+        await message.answer('❌ Нельзя активировать свой промокод.')
+        return
+    set_user_promo(message.from_user.id, code)
+    await message.answer(f'✅ Промокод <code>{code}</code> активирован!\n🎁 Скидка <b>{discount}%</b> применится при покупке подписки.', parse_mode='HTML')
 
 
 @dp.message(States.admin_check_id)

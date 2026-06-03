@@ -5,6 +5,7 @@ from aiogram.filters import CommandStart, Command, Filter
 from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 from main import REPORTS_DB, USERS_DB
 import datetime
+import json
 
 
 async def add_user(tg_id: int, username: str | None) -> bool:
@@ -227,3 +228,49 @@ async def remove_device(device_id: int, tg_id: int) -> None:
     _init_devices_table()
     with sqlite3.connect(USERS_DB) as db:
         db.execute("DELETE FROM vpn_devices WHERE id = ? AND tg_id = ?", (device_id, tg_id))
+
+def load_promo():
+    with open('promos.json', 'r') as p:
+        return json.load(p)
+
+
+def create_promocode(code: str, owner_id: int, discount: int) -> bool:
+    with sqlite3.connect(USERS_DB) as db:
+        try:
+            db.execute("INSERT INTO promocodes (code, owner_id, discount) VALUES (?, ?, ?)", (code, owner_id, discount))
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+
+def get_promocode(code: str):
+    with sqlite3.connect(USERS_DB) as db:
+        cur = db.cursor()
+        cur.execute("SELECT code, owner_id, discount FROM promocodes WHERE code = ?", (code.upper(),))
+        return cur.fetchone()
+
+
+def get_user_promo(tg_id: int):
+    with sqlite3.connect(USERS_DB) as db:
+        cur = db.cursor()
+        cur.execute("SELECT code FROM user_promos WHERE tg_id = ?", (tg_id,))
+        row = cur.fetchone()
+        return row[0] if row else None
+
+
+def set_user_promo(tg_id: int, code: str):
+    with sqlite3.connect(USERS_DB) as db:
+        db.execute("INSERT OR REPLACE INTO user_promos (tg_id, code) VALUES (?, ?)", (tg_id, code))
+
+
+def get_trafer_promocodes(owner_id: int):
+    with sqlite3.connect(USERS_DB) as db:
+        cur = db.cursor()
+        cur.execute("SELECT code, discount FROM promocodes WHERE owner_id = ?", (owner_id,))
+        return cur.fetchall()
+
+
+def delete_promocode(code: str):
+    with sqlite3.connect(USERS_DB) as db:
+        db.execute("DELETE FROM promocodes WHERE code = ?", (code.upper(),))
+
