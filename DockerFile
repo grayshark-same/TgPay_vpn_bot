@@ -14,8 +14,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends tzdata \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY main.py requests.py lava.py vpn.py webhook.py payments.py ./
-COPY menu.png ./
+COPY main.py requests.py lava.py vpn.py webhook.py payments.py banner.py ./
+COPY menu.png banner1.jpg banner2.jpg banner3.jpg ./
+
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /app/data
 

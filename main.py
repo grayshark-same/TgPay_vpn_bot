@@ -858,6 +858,20 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
         await state.set_state(States.promo_code_input)
         await edit_or_answer(callback, '🎟 <b>Создание промокода</b>\n\nВведите текст промокода (латиница, без пробелов):')
 
+    elif data.startswith('banner_'):
+        parts = data.split('_')
+        code = parts[1]
+        banner_num = int(parts[2])
+        from banner import generate_banner
+        from aiogram.types import BufferedInputFile
+        buf = generate_banner(banner_num, code)
+        await callback.message.answer_photo(
+            photo=BufferedInputFile(buf.read(), filename='banner.jpg'),
+            caption=f'🎟 Ваш баннер с промокодом <code>{code}</code>',
+            parse_mode='HTML'
+        )
+        await callback.answer()
+
     elif data == 'activate_promo':
         current = get_user_promo(user.id)
         if current:
@@ -1340,7 +1354,10 @@ async def promo_code_input_handler(message: Message, state: FSMContext):
         return
     await state.update_data(promo_code=code)
     await state.set_state(States.promo_discount_input)
-    await message.answer(f'🎟 Промокод: <code>{code}</code>\n\nВведите размер скидки в % (от 1 до {ref_procent - 1}):', parse_mode='HTML')
+    await message.answer(
+        f'🎟 Промокод: <code>{code}</code>\n\nВведите размер скидки в % (от 1 до {ref_procent - 1}):',
+        parse_mode='HTML'
+    )
 
 
 @dp.message(States.promo_discount_input)
@@ -1357,10 +1374,20 @@ async def promo_discount_input_handler(message: Message, state: FSMContext):
     code = fsm_data['promo_code']
     ok = create_promocode(code, message.from_user.id, discount)
     await state.clear()
-    if ok:
-        await message.answer(f'✅ Промокод <code>{code}</code> создан!\nСкидка: <b>{discount}%</b>\nВаша выплата: <b>{ref_procent - discount}%</b>', parse_mode='HTML')
-    else:
+    if not ok:
         await message.answer(f'❌ Промокод <code>{code}</code> уже существует. Придумайте другой.', parse_mode='HTML')
+        return
+    await message.answer(
+        f'✅ Промокод <code>{code}</code> создан!\nСкидка: <b>{discount}%</b>\nВаша выплата: <b>{ref_procent - discount}%</b>\n\nВыберите баннер:',
+        parse_mode='HTML',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text='Баннер 1', callback_data=f'banner_{code}_1'),
+                InlineKeyboardButton(text='Баннер 2', callback_data=f'banner_{code}_2'),
+                InlineKeyboardButton(text='Баннер 3', callback_data=f'banner_{code}_3'),
+            ]
+        ])
+    )
 
 
 @dp.message(States.activate_promo_input)
