@@ -125,7 +125,7 @@ admin_panel = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text='Добавить трафера', callback_data='admin_add_trafer')],
     [InlineKeyboardButton(text='Выдать подписку', callback_data='admin_give_sub')],
     [InlineKeyboardButton(text='Выгрузить пользователей', callback_data='export_users')],
-    [InlineKeyboardButton(text='Промокоды', callback_data='promo')],
+    # [InlineKeyboardButton(text='Промокоды', callback_data='promo')],
     [InlineKeyboardButton(text='Рассылка', callback_data='newsletter')]
 ])
 admin_return_button = InlineKeyboardMarkup(inline_keyboard=[
@@ -855,6 +855,23 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
         if ref_procent <= 0:
             await callback.answer('❌ Только траферы могут создавать промокоды.', show_alert=True)
             return
+        existing = get_trafer_promocodes(user.id)
+        if existing:
+            codes_text = '\n'.join(f'• <code>{code}</code> — скидка {disc}%' for code, disc in existing)
+            await edit_or_answer(
+                callback,
+                f'🎟 <b>Ваши промокоды:</b>\n\n{codes_text}',
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text='➕ Создать новый', callback_data='create_promo_new')],
+                    [back_btn('referral')[0]]
+                ])
+            )
+            return
+        await state.set_state(States.promo_code_input)
+        await edit_or_answer(callback, '🎟 <b>Создание промокода</b>\n\nВведите текст промокода (латиница, без пробелов):')
+
+    elif data == 'create_promo_new':
+        _, _, ref_procent = await get_ref_info(user.id)
         await state.set_state(States.promo_code_input)
         await edit_or_answer(callback, '🎟 <b>Создание промокода</b>\n\nВведите текст промокода (латиница, без пробелов):')
 
