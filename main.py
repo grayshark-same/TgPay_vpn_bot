@@ -563,7 +563,7 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
     elif data == 'activate_error':
         await callback.answer("Не удалось подготовить подписку. Напишите в поддержку.", show_alert=True)
 
-    elif data.startswith('activate_'):
+    elif data.startswith('activate_') and data != 'activate_promo':
         await callback.answer("Откройте раздел подключения и нажмите кнопку автонастройки.", show_alert=True)
 
     elif data == 'devices' or data.startswith('device_remove_'):
