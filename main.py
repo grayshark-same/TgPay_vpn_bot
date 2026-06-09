@@ -6,7 +6,7 @@ from aiogram.types import FSInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State, default_state
 from aiogram.filters import Command, StateFilter
-from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, ReplyKeyboardRemove, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils.deep_linking import create_start_link, decode_payload
 from dotenv import load_dotenv
 import json
@@ -239,12 +239,8 @@ async def send_main_menu(target, user_id, username=None):
             await target.message.delete()
             await target.message.answer_photo(photo=photo, caption=text, reply_markup=buttons, parse_mode='HTML')
     else:
-        kbd_msg = await target.answer('⠀', reply_markup=_main_menu_kbd)
+        await target.answer('⠀', reply_markup=_main_menu_kbd)
         await target.answer_photo(photo=photo, caption=text, reply_markup=buttons, parse_mode='HTML')
-        try:
-            await kbd_msg.delete()
-        except Exception:
-            pass
 
 
 
@@ -357,9 +353,7 @@ async def payment_checker_loop():
 @dp.message(Command('start'))
 async def start_handler(message: Message):
     try:
-        msg = await message.answer('.', reply_markup=ReplyKeyboardRemove())
         await bot.unpin_all_chat_messages(chat_id=message.chat.id)
-        await msg.delete()
     except Exception as e:
         print(f'[start cleanup] {type(e).__name__}: {e}')
     if not await is_subscribed(message.from_user.id):
