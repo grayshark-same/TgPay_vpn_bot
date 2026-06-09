@@ -355,7 +355,7 @@ async def start_handler(message: Message):
         await bot.unpin_all_chat_messages(chat_id=message.chat.id)
     except Exception as e:
         print(f'[start cleanup] {type(e).__name__}: {e}')
-    await message.answer('⠀', reply_markup=_main_menu_kbd)
+    await message.answer('<tg-spoiler>.</tg-spoiler>', reply_markup=_main_menu_kbd, parse_mode='HTML')
     if not await is_subscribed(message.from_user.id):
         await message.answer(
             _sub_required_text,
