@@ -239,8 +239,12 @@ async def send_main_menu(target, user_id, username=None):
             await target.message.delete()
             await target.message.answer_photo(photo=photo, caption=text, reply_markup=buttons, parse_mode='HTML')
     else:
-        await target.answer('⠀', reply_markup=_main_menu_kbd)
+        kbd_msg = await target.answer('⠀', reply_markup=_main_menu_kbd)
         await target.answer_photo(photo=photo, caption=text, reply_markup=buttons, parse_mode='HTML')
+        try:
+            await kbd_msg.delete()
+        except Exception:
+            pass
 
 
 
