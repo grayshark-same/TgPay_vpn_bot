@@ -6,7 +6,7 @@ from aiogram.types import FSInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State, default_state
 from aiogram.filters import Command, StateFilter
-from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, ReplyKeyboardRemove
+from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, ReplyKeyboardRemove, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils.deep_linking import create_start_link, decode_payload
 from dotenv import load_dotenv
 import json
@@ -118,6 +118,11 @@ bot_balance = 0
 plans = {1: 360, 3: 960, 6: 1790, 12: 2990}
 plan_days_map = {1: 30, 3: 90, 6: 180, 12: 360}
 plan_names = {1: '1 месяц', 3: '3 месяца', 6: '6 месяцев', 12: '⚡️12 месяцев'}
+
+_main_menu_kbd = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text='🏠 Главное меню')]],
+    resize_keyboard=True,
+)
 
 admin_panel = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text='Статистика', callback_data='statistic')],
@@ -234,6 +239,7 @@ async def send_main_menu(target, user_id, username=None):
             await target.message.delete()
             await target.message.answer_photo(photo=photo, caption=text, reply_markup=buttons, parse_mode='HTML')
     else:
+        await target.answer('​', reply_markup=_main_menu_kbd)
         await target.answer_photo(photo=photo, caption=text, reply_markup=buttons, parse_mode='HTML')
 
 
@@ -387,6 +393,12 @@ async def start_handler(message: Message):
         )
  
  
+@dp.message(F.text == '🏠 Главное меню')
+async def main_menu_btn_handler(message: Message, state: FSMContext):
+    await state.clear()
+    await send_main_menu(message, message.from_user.id, message.from_user.username)
+
+
 @dp.message(Command('test_archive'))
 async def test_archive_command(message: Message):
     if str(message.from_user.id) not in admins:
