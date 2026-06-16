@@ -156,6 +156,7 @@ class States(StatesGroup):
     promo_code_input = State()
     promo_discount_input = State()
     activate_promo_input = State()
+    promo_edit_discount_input = State()
 
 # @dp.message(F.photo)
 # async def get_file_id(message: Message):
@@ -868,13 +869,13 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
         existing = get_trafer_promocodes(user.id)
         if existing:
             codes_text = '\n'.join(f'• <code>{code}</code> — скидка {disc}%' for code, disc in existing)
+            rows = [[InlineKeyboardButton(text=f'✏️ {code} ({disc}%)', callback_data=f'edit_promo_{code}')] for code, disc in existing]
+            rows.append([InlineKeyboardButton(text='➕ Создать новый', callback_data='create_promo_new')])
+            rows.append([back_btn('referral')[0]])
             await edit_or_answer(
                 callback,
                 f'🎟 <b>Ваши промокоды:</b>\n\n{codes_text}',
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text='➕ Создать новый', callback_data='create_promo_new')],
-                    [back_btn('referral')[0]]
-                ])
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
             )
             return
         await state.set_state(States.promo_code_input)
@@ -884,6 +885,22 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
         _, _, ref_procent = await get_ref_info(user.id)
         await state.set_state(States.promo_code_input)
         await edit_or_answer(callback, '🎟 <b>Создание промокода</b>\n\nВведите текст промокода (латиница, без пробелов):')
+
+    elif data.startswith('edit_promo_'):
+        code = data[len('edit_promo_'):]
+        promo_info = get_promocode(code)
+        if not promo_info or promo_info[1] != user.id:
+            await callback.answer('❌ Промокод не найден.', show_alert=True)
+            return
+        _, _, ref_procent = await get_ref_info(user.id)
+        await state.update_data(edit_promo_code=code)
+        await state.set_state(States.promo_edit_discount_input)
+        await edit_or_answer(
+            callback,
+            f'✏️ <b>Изменение скидки для <code>{code}</code></b>\n\n'
+            f'Текущая скидка: {promo_info[2]}%\n'
+            f'Введите новый процент скидки (0–{ref_procent - 1}):'
+        )
 
     elif data.startswith('banner_'):
         parts = data.split('_')
@@ -1382,7 +1399,7 @@ async def promo_code_input_handler(message: Message, state: FSMContext):
     await state.update_data(promo_code=code)
     await state.set_state(States.promo_discount_input)
     await message.answer(
-        f'🎟 Промокод: <code>{code}</code>\n\nВведите размер скидки в % (от 1 до {ref_procent - 1}):',
+        f'🎟 Промокод: <code>{code}</code>\n\nВведите размер скидки в % (от 0 до {ref_procent}):',
         parse_mode='HTML'
     )
 
@@ -1394,8 +1411,8 @@ async def promo_discount_input_handler(message: Message, state: FSMContext):
         await message.answer('❌ Введите целое число:')
         return
     discount = int(message.text)
-    if discount < 1 or discount >= ref_procent:
-        await message.answer(f'❌ Скидка должна быть от 1 до {ref_procent - 1}%:')
+    if discount < 0 or discount > ref_procent:
+        await message.answer(f'❌ Скидка должна быть от 0 до {ref_procent}%:')
         return
     fsm_data = await state.get_data()
     code = fsm_data['promo_code']
@@ -1414,6 +1431,27 @@ async def promo_discount_input_handler(message: Message, state: FSMContext):
                 InlineKeyboardButton(text='Баннер 3', callback_data=f'banner_{code}_3'),
             ]
         ])
+    )
+
+
+@dp.message(States.promo_edit_discount_input)
+async def promo_edit_discount_handler(message: Message, state: FSMContext):
+    _, _, ref_procent = await get_ref_info(message.from_user.id)
+    if not message.text or not message.text.isdigit():
+        await message.answer('❌ Введите целое число:')
+        return
+    discount = int(message.text)
+    if discount < 0 or discount >= ref_procent:
+        await message.answer(f'❌ Скидка должна быть от 0 до {ref_procent - 1}%:')
+        return
+    fsm_data = await state.get_data()
+    code = fsm_data['edit_promo_code']
+    update_promocode_discount(code, discount)
+    await state.clear()
+    await message.answer(
+        f'✅ Скидка для <code>{code}</code> изменена на <b>{discount}%</b>\nВаша выплата: <b>{ref_procent - discount}%</b>',
+        parse_mode='HTML',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_menu_btn()[0]]])
     )
 
 

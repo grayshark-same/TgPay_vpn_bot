@@ -274,3 +274,8 @@ def delete_promocode(code: str):
     with sqlite3.connect(USERS_DB) as db:
         db.execute("DELETE FROM promocodes WHERE code = ?", (code.upper(),))
 
+
+def update_promocode_discount(code: str, discount: int):
+    with sqlite3.connect(USERS_DB) as db:
+        db.execute("UPDATE promocodes SET discount = ? WHERE code = ?", (discount, code.upper()))
+
