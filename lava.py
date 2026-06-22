@@ -5,6 +5,49 @@ import json
 import os
 import uuid
 
+LAVATOP_BASE = "https://gate.lava.top"
+LAVATOP_OFFER_ID = "b7e59827-e453-4082-9a2c-49c666efdeab"
+
+_PLAN_PERIODICITY = {
+    1: 'MONTHLY',
+    3: 'period_90',
+    6: 'period_180',
+    12: 'period_year',
+}
+
+
+async def create_lavatop_subscription(plan: int, user_id: int, method: str = 'BANK_CARD') -> dict | None:
+    """Создать инвойс подписки lava.top. method: BANK_CARD или SBP."""
+    api_key = os.getenv('LAVATOP_API_KEY')
+    if not api_key:
+        print('[lavatop] LAVATOP_API_KEY not set')
+        return None
+    periodicity = _PLAN_PERIODICITY.get(plan)
+    if not periodicity:
+        return None
+    payload = {
+        'email': f'{user_id}@vpnbot.tg',
+        'offerId': LAVATOP_OFFER_ID,
+        'currency': 'RUB',
+        'periodicity': periodicity,
+        'paymentProvider': 'PAY2ME',
+        'paymentMethod': method,
+    }
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f'{LAVATOP_BASE}/api/v3/invoice',
+                headers={'X-Api-Key': api_key, 'Content-Type': 'application/json'},
+                json=payload,
+            ) as resp:
+                data = await resp.json()
+                print(f'[lavatop] create subscription {resp.status}: {data}')
+                if resp.status in (200, 201) and data.get('paymentUrl'):
+                    return data
+    except Exception as e:
+        print(f'[lavatop] request error: {e}')
+    return None
+
 
 LAVA_BASE = "https://api.lava.ru"
 
