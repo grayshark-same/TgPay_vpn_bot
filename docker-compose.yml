@@ -6,8 +6,7 @@ services:
     container_name: tgp-vpn-bot
     env_file: .env
     restart: unless-stopped
-    ports:
-      - "8090:8090"
+    network_mode: host
     volumes:
       - ./data:/app/data
     logging:
