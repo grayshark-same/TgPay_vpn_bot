@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import datetime
 import json
@@ -254,7 +255,7 @@ async def _get_crypt5_url(sub_url: str) -> str:
             async with session.post(
                 "https://crypto.happ.su/api-v2.php",
                 json={"url": sub_url},
-                timeout=aiohttp.ClientTimeout(total=10),
+                timeout=aiohttp.ClientTimeout(total=3),
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json(content_type=None)
@@ -367,7 +368,8 @@ class XuiClient:
     async def sync_client(self, tg_id: int, account: dict[str, str], end_date: datetime.datetime) -> None:
         if not self.node.panel_url or not self.node.username or not self.node.password or not self.node.inbound_id:
             raise RuntimeError(f"{self.node.name}: 3x-ui panel is not fully configured")
-        async with aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True)) as session:
+        _timeout = aiohttp.ClientTimeout(total=15)
+        async with aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True), timeout=_timeout) as session:
             await self._login(session)
             inbound_data = await self._request(session, "GET", f"/panel/api/inbounds/get/{self.node.inbound_id}")
             inbound = _extract_obj(inbound_data)
@@ -396,22 +398,37 @@ class XuiClient:
                 await self._request(session, "POST", "/panel/api/inbounds/addClient", json=body)
 
 
-async def ensure_vpn_account(tg_id: int, end_date: datetime.datetime, username: str | None = None) -> str:
+async def _sync_node(node: XuiNode, tg_id: int, node_account: dict, end_date: datetime.datetime) -> None:
+    try:
+        await XuiClient(node).sync_client(tg_id, node_account, end_date)
+    except Exception as e:
+        print(f"[vpn] panel sync failed for {node.name}: {e}")
+
+
+async def ensure_vpn_account(
+    tg_id: int,
+    end_date: datetime.datetime,
+    username: str | None = None,
+    background_sync: bool = False,
+) -> str:
     if not PUBLIC_SUB_URL:
         raise RuntimeError("PUBLIC_SUB_URL is not set")
     _get_or_create_account(tg_id, username)
     nodes = _load_nodes()
     if not nodes:
         raise RuntimeError("VPN nodes are not configured")
+    panel_tasks = []
     for node in nodes:
         node_account = _get_or_create_node_account(tg_id, node, username)
         if node.panel_url and node.username and node.password and node.inbound_id:
-            try:
-                await XuiClient(node).sync_client(tg_id, node_account, end_date)
-            except Exception as e:
-                print(f"[vpn] panel sync failed for {node.name}: {e}")
+            panel_tasks.append(_sync_node(node, tg_id, node_account, end_date))
         elif not _build_node_link(node, node_account) and not node.sub_base_url:
             print(f"[vpn] skipping {node.name}: no panel and no direct link fields")
+    if panel_tasks:
+        if background_sync:
+            asyncio.create_task(asyncio.gather(*panel_tasks))
+        else:
+            await asyncio.gather(*panel_tasks)
     return get_subscription_url(tg_id, username)
 
 
@@ -593,7 +610,7 @@ def _decode_subscription(text: str) -> list[str]:
 
 async def _fetch_node_links(session: aiohttp.ClientSession, node: XuiNode, sub_token: str) -> list[str]:
     url = f"{node.sub_base_url}/{sub_token}"
-    async with session.get(url, ssl=_bool_env("VPN_VERIFY_SSL", False)) as resp:
+    async with session.get(url, ssl=_bool_env("VPN_VERIFY_SSL", False), timeout=aiohttp.ClientTimeout(total=10)) as resp:
         if resp.status != 200:
             print(f"[sub] {node.name} returned {resp.status}")
             return []
@@ -615,9 +632,12 @@ async def build_merged_subscription(token: str) -> str:
         elif node.sub_base_url:
             fetch_nodes.append(node)
 
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
         for node in fetch_nodes:
-            links.extend(await _fetch_node_links(session, node, token))
+            try:
+                links.extend(await _fetch_node_links(session, node, token))
+            except Exception as e:
+                print(f"[sub] fetch failed for {node.name}: {e}")
 
     deduped_links = list(dict.fromkeys(links))
     return base64.b64encode("\n".join(deduped_links).encode()).decode()
