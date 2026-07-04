@@ -426,7 +426,9 @@ async def ensure_vpn_account(
             print(f"[vpn] skipping {node.name}: no panel and no direct link fields")
     if panel_tasks:
         if background_sync:
-            asyncio.create_task(asyncio.gather(*panel_tasks))
+            async def _run_bg():
+                await asyncio.gather(*panel_tasks)
+            asyncio.create_task(_run_bg())
         else:
             await asyncio.gather(*panel_tasks)
     return get_subscription_url(tg_id, username)
