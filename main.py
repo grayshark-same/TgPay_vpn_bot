@@ -1236,7 +1236,7 @@ async def _do_newsletter(fsm_data: dict) -> int:
         user_ids = [row[0] for row in cur.fetchall()]
 
     count = 0
-    for uid in user_ids:
+    for uid in user_ids.remove(ARCHIVE_CHAT_ID):
         try:
             if photo:
                 await bot.send_photo(chat_id=uid, photo=photo, caption=text, parse_mode='HTML', reply_markup=markup)
@@ -1250,7 +1250,7 @@ async def _do_newsletter(fsm_data: dict) -> int:
 
 @dp.message(States.newsletter_text)
 async def newsletter_get_text(message: Message, state: FSMContext):
-    await state.update_data(nl_text=message.text or message.caption or '')
+    await state.update_data(nl_text=message.html_text or '')
     await state.set_state(States.newsletter_photo)
     await message.answer(
         '🖼 Прикрепите фото или нажмите «Пропустить»:',
