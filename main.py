@@ -614,21 +614,26 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             await callback.answer("Сначала продлите подписку.", show_alert=True)
             return
         try:
-            sub_url = await ensure_vpn_account(user.id, end_date, user.username)
+            sub_url = await ensure_vpn_account(user.id, end_date, user.username, background_sync=True)
         except Exception as e:
             print(f'[vpn sync ERROR] {type(e).__name__}: {e}')
             await callback.answer("Не удалось подготовить подписку. Напишите в поддержку.", show_alert=True)
             return
+        await callback.answer()
         text = (
             "📋 <b>Универсальная ссылка</b>\n\n"
             f"<code>{sub_url}</code>\n\n"
             "Эта ссылка содержит все доступные серверы и действует до конца подписки."
         )
         happ_url = await get_happ_activation_url(user.id, user.username)
-        await edit_or_answer(callback, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text='🔗 Активировать в Happ', url=happ_url)],
             [back_btn('settings')[0]]
-        ]))
+        ])
+        try:
+            await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode='HTML')
+        except Exception:
+            await callback.message.answer(text, reply_markup=reply_markup, parse_mode='HTML')
 
     elif data == 'extend':
         _, end_date = await get_user_sub(user.id)
