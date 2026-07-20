@@ -87,6 +87,13 @@ async def get_stats(days: int = None) -> tuple:
         money = float(row[1]) if row else 0.0
     return users, transactions, money
 
+
+async def get_total_users_balance() -> float:
+    with sqlite3.connect(USERS_DB) as db:
+        cur = db.cursor()
+        cur.execute("SELECT COALESCE(SUM(balance),0) FROM users")
+        return float(cur.fetchone()[0])
+
 async def add_report(money: int):
     today = datetime.date.today().isoformat()
     with sqlite3.connect(REPORTS_DB) as db:

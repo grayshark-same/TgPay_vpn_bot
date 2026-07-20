@@ -127,6 +127,7 @@ _main_menu_kbd = ReplyKeyboardMarkup(
 admin_panel = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text='Статистика', callback_data='statistic')],
     [InlineKeyboardButton(text='Баланс пользователя', callback_data='admin_balance')],
+    [InlineKeyboardButton(text='Общий баланс пользователей', callback_data='total_users_balance')],
     [InlineKeyboardButton(text='Добавить трафера', callback_data='admin_add_trafer')],
     [InlineKeyboardButton(text='Выдать подписку', callback_data='admin_give_sub')],
     [InlineKeyboardButton(text='Выгрузить пользователей', callback_data='export_users')],
@@ -218,7 +219,7 @@ async def send_main_menu(target, user_id, username=None):
         '<tg-emoji emoji-id="5985479497586053461">🗺</tg-emoji> Работает в любой точке мира\n'
         '<tg-emoji emoji-id="5865981429963296202">📱</tg-emoji> Поддержка iPhone, Android, Windows, Mac\n'
         f"<blockquote><tg-emoji emoji-id='6043896193887506430'>📌</tg-emoji> Ваша подписка: <code>{status}</code>\n"
-        f"<tg-emoji emoji-id='5967382867632722656'>📅</tg-emoji>Действует до: <code>{date_str}</code>\n<tg-emoji emoji-id='5769126056262898415'>👛</tg-emoji>Ваш баланс: <code>{balance}₽</code></blockquote>\n\n"
+        f"<tg-emoji emoji-id='5967382867632722656'>📅</tg-emoji>Действует до: <code>{date_str}</code>\n<tg-emoji emoji-id='5769126056262898415'>👛</tg-emoji>Ваш баланс: <code>{balance}₽</code>\n<tg-emoji emoji-id='6035084557378654059'>👤</tg-emoji>Ваш ID: <code>{user_id}₽</code></blockquote>\n\n\n"
         'Выберите действие ниже <tg-emoji emoji-id="5231102735817918643">👇</tg-emoji>'
     )
     buttons = InlineKeyboardMarkup(inline_keyboard=[
@@ -768,7 +769,7 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
                         )
                     except Exception:
                         pass
-            await edit_or_answer(callback, text='✅ Подписка успешно куплена!', reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_menu_btn()[0]]]))
+            await edit_or_answer(callback, text='✅ Подписка успешно куплена!', reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='Подключиться к VPN', style='primary', callback_data='connect')],[back_menu_btn()[0]]]))
         else:
             await edit_or_answer(callback, text=f'На вашем балансе нехватает <code>{summ - await get_user_balance(user.id)}</code>₽', reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='Пополнить баланс', callback_data=f'balance_{summ}')]]))
 
@@ -778,7 +779,7 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
         if summ == 0:
             await state.update_data(method=method)
             await state.set_state(States.summ)
-            await edit_or_answer(callback, '<tg-emoji emoji-id="5904359114531675993">💰</tg-emoji> Введите сумму пополнения:')
+            await edit_or_answer(callback, '<tg-emoji emoji-id="5904359114531675993">💰</tg-emoji> Введите сумму пополнения в рубля:')
         elif method == 'card':
             await state.update_data(summ=summ)
             await state.set_state(States.pay_receipt)
@@ -1117,6 +1118,14 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
         elif data == 'admin_balance':
             await state.set_state(States.admin_check_id)
             await callback.message.answer('👤 Введите ID пользователя:')
+
+        elif data == 'total_users_balance':
+            total = await get_total_users_balance()
+            await callback.message.answer(
+                f'👛 Общий баланс всех пользователей: <code>{total:.2f}₽</code> / <code>${total/USD_RATE:.2f}</code>',
+                parse_mode='HTML',
+                reply_markup=admin_return_button
+            )
 
         elif data.startswith('admin_deduct_'):
             parts = data.split('_')
