@@ -150,6 +150,7 @@ class States(StatesGroup):
     admin_check_id = State()
     admin_deduct_summ = State()
     admin_deduct_ref_summ = State()
+    admin_grant_summ = State()
     admin_trafer_id = State()
     admin_trafer_procent = State()
     admin_give_sub_id = State()
@@ -219,7 +220,7 @@ async def send_main_menu(target, user_id, username=None):
         '<tg-emoji emoji-id="5985479497586053461">🗺</tg-emoji> Работает в любой точке мира\n'
         '<tg-emoji emoji-id="5865981429963296202">📱</tg-emoji> Поддержка iPhone, Android, Windows, Mac\n'
         f"<blockquote><tg-emoji emoji-id='6043896193887506430'>📌</tg-emoji> Ваша подписка: <code>{status}</code>\n"
-        f"<tg-emoji emoji-id='5967382867632722656'>📅</tg-emoji>Действует до: <code>{date_str}</code>\n<tg-emoji emoji-id='5769126056262898415'>👛</tg-emoji>Ваш баланс: <code>{balance}₽</code>\n<tg-emoji emoji-id='6035084557378654059'>👤</tg-emoji>Ваш ID: <code>{user_id}₽</code></blockquote>\n\n\n"
+        f"<tg-emoji emoji-id='5967382867632722656'>📅</tg-emoji>Действует до: <code>{date_str}</code>\n<tg-emoji emoji-id='5769126056262898415'>👛</tg-emoji>Ваш баланс: <code>{balance}₽</code>\n<tg-emoji emoji-id='6035084557378654059'>👤</tg-emoji>Ваш ID: <code>{user_id}</code></blockquote>\n\n\n"
         'Выберите действие ниже <tg-emoji emoji-id="5231102735817918643">👇</tg-emoji>'
     )
     buttons = InlineKeyboardMarkup(inline_keyboard=[
@@ -1121,10 +1122,22 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
 
         elif data == 'total_users_balance':
             total = await get_total_users_balance()
+            total_ref = await get_total_ref_balance()
             await callback.message.answer(
-                f'👛 Общий баланс всех пользователей: <code>{total:.2f}₽</code> / <code>${total/USD_RATE:.2f}</code>',
+                f'👛 Общий баланс всех пользователей: <code>{total:.2f}₽</code> / <code>${total/USD_RATE:.2f}</code>\n'
+                f'🤝 Общий реферальный баланс: <code>{total_ref:.2f}₽</code> / <code>${total_ref/USD_RATE:.2f}</code>',
                 parse_mode='HTML',
                 reply_markup=admin_return_button
+            )
+
+        elif data.startswith('admin_grant_'):
+            uid = int(data.split('_')[2])
+            balance = await get_user_balance(uid)
+            await state.update_data(grant_uid=uid)
+            await state.set_state(States.admin_grant_summ)
+            await callback.message.answer(
+                f'💰 Основной баланс: <code>{balance}₽</code>\n\nВведите сумму для начисления:',
+                parse_mode='HTML'
             )
 
         elif data.startswith('admin_deduct_'):
@@ -1509,6 +1522,7 @@ async def admin_check_id_handler(message: Message, state: FSMContext):
         f'🤝 Реферальный баланс: <code>{ref_balance}₽</code>'
     )
     buttons = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='➕ Выдать баланс', callback_data=f'admin_grant_{uid}')],
         [InlineKeyboardButton(text='💸 Списать основной баланс', callback_data=f'admin_deduct_{uid}')],
         [InlineKeyboardButton(text='💸 Списать реф. баланс', callback_data=f'admin_deduct_ref_{uid}')],
         [InlineKeyboardButton(text='« Назад', callback_data='admin_return')]
@@ -1546,6 +1560,34 @@ async def admin_deduct_summ_handler(message: Message, state: FSMContext):
     )
     try:
         await bot.send_message(uid, f'❗️ Администратор списал <code>{summ}₽</code> с вашего баланса.', parse_mode='HTML')
+    except Exception:
+        pass
+
+
+@dp.message(States.admin_grant_summ)
+async def admin_grant_summ_handler(message: Message, state: FSMContext):
+    if str(message.from_user.id) not in admins:
+        return
+    if not message.text or not message.text.strip().isdigit():
+        await message.answer('❌ Введите корректную сумму (только цифры):')
+        return
+    summ = int(message.text.strip())
+    fsm_data = await state.get_data()
+    uid = fsm_data.get('grant_uid')
+    await add_balance(tg_id=uid, summ=summ)
+    await add_report(money=summ)
+    await state.clear()
+    new_balance = await get_user_balance(uid)
+    await message.answer(
+        f'✅ Начислено <code>{summ}₽</code> пользователю <code>{uid}</code>\n'
+        f'Новый баланс: <code>{new_balance}₽</code>',
+        parse_mode='HTML',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text='« В панель', callback_data='admin_return')]
+        ])
+    )
+    try:
+        await bot.send_message(uid, f'<tg-emoji emoji-id="5774022692642492953">✅</tg-emoji> Администратор начислил вам <code>{summ}₽</code>!', parse_mode='HTML')
     except Exception:
         pass
 
