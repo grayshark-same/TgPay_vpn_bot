@@ -18,6 +18,7 @@ from vpn import (
     get_subscription_url,
     init_vpn_db,
     start_subscription_server,
+    start_internal_server,
 )
 import sqlite3
  
@@ -1791,6 +1792,7 @@ async def expiry_reminder_loop():
 async def on_startup(*args, **kwargs):
     import asyncio
     await start_subscription_server()
+    await start_internal_server()
     asyncio.create_task(expiry_reminder_loop())
     asyncio.create_task(payment_checker_loop())
 

@@ -21,6 +21,7 @@ DB_DIR = os.getenv("DB_DIR", ".")
 USERS_DB = os.path.join(DB_DIR, "users.db")
 PUBLIC_SUB_URL = os.getenv("PUBLIC_SUB_URL", "").rstrip("/")
 SUB_PORT = int(os.getenv("SUB_PORT", "8080"))
+INTERNAL_PORT = int(os.getenv("INTERNAL_PORT", "8091"))
 
 
 @dataclass
@@ -698,6 +699,32 @@ async def handle_redirect(request: web.Request) -> web.Response:
 
 async def handle_health(_: web.Request) -> web.Response:
     return web.Response(text="ok", content_type="text/plain")
+
+
+async def handle_ensure_account(request: web.Request) -> web.Response:
+    try:
+        data = await request.json()
+        tg_id = int(data["tg_id"])
+        end_date = datetime.datetime.fromisoformat(data["end_date"])
+        username = data.get("username")
+    except (KeyError, ValueError, TypeError, json.JSONDecodeError) as e:
+        return web.json_response({"ok": False, "error": f"bad request: {e}"}, status=400)
+    try:
+        sub_url = await ensure_vpn_account(tg_id, end_date, username)
+    except Exception as e:
+        return web.json_response({"ok": False, "error": str(e)}, status=500)
+    return web.json_response({"ok": True, "sub_url": sub_url})
+
+
+async def start_internal_server() -> web.AppRunner:
+    app = web.Application()
+    app.router.add_post("/internal/ensure-account", handle_ensure_account)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", INTERNAL_PORT)
+    await site.start()
+    print(f"[internal] server started on 127.0.0.1:{INTERNAL_PORT}")
+    return runner
 
 
 async def start_subscription_server() -> web.AppRunner:
