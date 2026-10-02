@@ -139,6 +139,21 @@ admin_return_button = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text='Назад', callback_data='admin_return')]
 ])
 
+NEWSLETTER_SOON_DAYS = 7
+NEWSLETTER_AUDIENCES = {
+    'all': 'Все пользователи',
+    'soon': f'Подписка истекает (≤{NEWSLETTER_SOON_DAYS} дн.)',
+    'expired': 'Подписка уже истекла',
+    'expired_or_soon': f'Истекла или истекает (≤{NEWSLETTER_SOON_DAYS} дн.)',
+}
+newsletter_audience_kbd = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text=f'👥 {NEWSLETTER_AUDIENCES["all"]}', callback_data='nl_aud_all')],
+    [InlineKeyboardButton(text=f'⏳ {NEWSLETTER_AUDIENCES["soon"]}', callback_data='nl_aud_soon')],
+    [InlineKeyboardButton(text=f'⛔️ {NEWSLETTER_AUDIENCES["expired"]}', callback_data='nl_aud_expired')],
+    [InlineKeyboardButton(text=f'🔔 {NEWSLETTER_AUDIENCES["expired_or_soon"]}', callback_data='nl_aud_expired_or_soon')],
+    [InlineKeyboardButton(text='Назад', callback_data='admin_return')],
+])
+
 
 class States(StatesGroup):
     summ = State()
@@ -1201,8 +1216,18 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             await callback.answer()
 
         elif data == 'newsletter':
+            await state.clear()
+            await callback.message.answer('👥 Кому отправить рассылку?', reply_markup=newsletter_audience_kbd)
+        elif data.startswith('nl_aud_'):
+            audience = data[len('nl_aud_'):]
             await state.set_state(States.newsletter_text)
-            await callback.message.answer('✍️ Введите текст рассылки:')
+            await state.update_data(nl_audience=audience)
+            await callback.message.answer(
+                f'👥 Аудитория: <b>{NEWSLETTER_AUDIENCES[audience]}</b>\n'
+                f'Получателей: <b>{len(_get_newsletter_recipients(audience))}</b>\n\n'
+                f'✍️ Введите текст рассылки:',
+                parse_mode='HTML'
+            )
         elif data == 'nl_skip_photo':
             await state.set_state(States.newsletter_buttons)
             await callback.message.answer(
@@ -1221,7 +1246,7 @@ async def callbacks(callback: CallbackQuery, state: FSMContext):
             await edit_or_answer(text=f'✅ Рассылка отправлена {count} пользователям.', callback=callback)
         elif data == 'nl_cancel':
             await state.clear()
-            await callback.message.edit_or_answer(callback, '❌ Рассылка отменена.')
+            await edit_or_answer(callback, '❌ Рассылка отменена.')
 
 
 
@@ -1234,9 +1259,38 @@ async def _parse_buttons(text: str) -> list:
     return rows
 
 
+def _get_newsletter_recipients(audience: str) -> list:
+    with sqlite3.connect(USERS_DB) as db:
+        cur = db.cursor()
+        cur.execute("SELECT tg_id, end_of_sub FROM users")
+        rows = cur.fetchall()
+    if audience == 'all':
+        return [tg_id for tg_id, _ in rows]
+
+    now = datetime.datetime.now()
+    soon_limit = now + datetime.timedelta(days=NEWSLETTER_SOON_DAYS)
+    recipients = []
+    for tg_id, end_of_sub in rows:
+        try:
+            end_date = datetime.datetime.strptime(end_of_sub, "%Y-%m-%d %H:%M:%S")
+        except (ValueError, TypeError):
+            continue
+        expired = end_date <= now
+        soon = now < end_date <= soon_limit
+        matches = {
+            'expired': expired,
+            'soon': soon,
+            'expired_or_soon': expired or soon,
+        }.get(audience, False)
+        if matches:
+            recipients.append(tg_id)
+    return recipients
+
+
 async def _send_newsletter_preview(message: Message, fsm_data: dict):
     text = fsm_data.get('nl_text', '')
     photo = fsm_data.get('nl_photo')
+    document = fsm_data.get('nl_document')
     buttons_text = fsm_data.get('nl_buttons', '')
     rows = await _parse_buttons(buttons_text) if buttons_text else []
     rows.append([
@@ -1244,9 +1298,17 @@ async def _send_newsletter_preview(message: Message, fsm_data: dict):
         InlineKeyboardButton(text='❌ Отмена', callback_data='nl_cancel')
     ])
     markup = InlineKeyboardMarkup(inline_keyboard=rows)
-    await message.answer('👁 <b>Предпросмотр:</b>', parse_mode='HTML')
+    audience = fsm_data.get('nl_audience', 'all')
+    await message.answer(
+        f'👁 <b>Предпросмотр:</b>\n'
+        f'👥 Аудитория: <b>{NEWSLETTER_AUDIENCES.get(audience, audience)}</b> — '
+        f'{len(_get_newsletter_recipients(audience))} чел.',
+        parse_mode='HTML'
+    )
     if photo:
         await message.answer_photo(photo=photo, caption=text, parse_mode='HTML', reply_markup=markup)
+    elif document:
+        await message.answer_document(document=document, caption=text, parse_mode='HTML', reply_markup=markup)
     else:
         await message.answer(text, parse_mode='HTML', reply_markup=markup)
 
@@ -1254,25 +1316,34 @@ async def _send_newsletter_preview(message: Message, fsm_data: dict):
 async def _do_newsletter(fsm_data: dict) -> int:
     text = fsm_data.get('nl_text', '')
     photo = fsm_data.get('nl_photo')
+    document = fsm_data.get('nl_document')
     buttons_text = fsm_data.get('nl_buttons', '')
     rows = await _parse_buttons(buttons_text) if buttons_text else []
     markup = InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
 
-    with sqlite3.connect(USERS_DB) as db:
-        cur = db.cursor()
-        cur.execute("SELECT tg_id FROM users")
-        user_ids = [row[0] for row in cur.fetchall()]
+    user_ids = _get_newsletter_recipients(fsm_data.get('nl_audience', 'all'))
+
+    archive_chat_id = None
+    if ARCHIVE_CHAT_ID:
+        try:
+            archive_chat_id = int(ARCHIVE_CHAT_ID)
+        except ValueError:
+            print(f'[newsletter] invalid ARCHIVE_CHAT_ID: {ARCHIVE_CHAT_ID}')
 
     count = 0
-    for uid in user_ids.remove(ARCHIVE_CHAT_ID):
+    for uid in user_ids:
+        if uid == archive_chat_id:
+            continue
         try:
             if photo:
                 await bot.send_photo(chat_id=uid, photo=photo, caption=text, parse_mode='HTML', reply_markup=markup)
+            elif document:
+                await bot.send_document(chat_id=uid, document=document, caption=text, parse_mode='HTML', reply_markup=markup)
             else:
                 await bot.send_message(chat_id=uid, text=text, parse_mode='HTML', reply_markup=markup)
             count += 1
-        except:
-            pass
+        except Exception as e:
+            print(f'[newsletter] send failed to {uid}: {type(e).__name__}: {e}')
     return count
 
 
@@ -1281,7 +1352,7 @@ async def newsletter_get_text(message: Message, state: FSMContext):
     await state.update_data(nl_text=message.html_text or '')
     await state.set_state(States.newsletter_photo)
     await message.answer(
-        '🖼 Прикрепите фото или нажмите «Пропустить»:',
+        '🖼 Прикрепите фото или файл (например, APK) или нажмите «Пропустить»:',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='Пропустить', callback_data='nl_skip_photo')]])
     )
 
@@ -1289,6 +1360,17 @@ async def newsletter_get_text(message: Message, state: FSMContext):
 @dp.message(States.newsletter_photo, F.photo)
 async def newsletter_get_photo(message: Message, state: FSMContext):
     await state.update_data(nl_photo=message.photo[-1].file_id)
+    await state.set_state(States.newsletter_buttons)
+    await message.answer(
+        '🔗 Введите кнопки в формате:\n<code>Текст кнопки | https://ссылка</code>\n\nКаждая кнопка с новой строки. Или нажмите «Пропустить».',
+        parse_mode='HTML',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='Пропустить', callback_data='nl_skip_buttons')]])
+    )
+
+
+@dp.message(States.newsletter_photo, F.document)
+async def newsletter_get_document(message: Message, state: FSMContext):
+    await state.update_data(nl_document=message.document.file_id)
     await state.set_state(States.newsletter_buttons)
     await message.answer(
         '🔗 Введите кнопки в формате:\n<code>Текст кнопки | https://ссылка</code>\n\nКаждая кнопка с новой строки. Или нажмите «Пропустить».',

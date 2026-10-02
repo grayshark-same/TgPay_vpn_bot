@@ -9,6 +9,21 @@ services:
     network_mode: host
     volumes:
       - ./data:/app/data
+      - ./vpn.py:/app/vpn.py
+      - ./main.py:/app/main.py
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  ua-relay:
+    image: haproxy:alpine
+    container_name: tgp-ua-relay
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./haproxy_ua_relay.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
     logging:
       driver: json-file
       options:

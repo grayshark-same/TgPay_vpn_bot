@@ -9,3 +9,5 @@ test_banner2.jpg
 test_banner3.jpg
 CLAUDE.md
 desktop.ini
+.env.save*
+.env.bak_*

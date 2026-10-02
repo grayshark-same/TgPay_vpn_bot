@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import datetime
+import html as html_lib
 import json
 import os
 import secrets
@@ -20,6 +21,10 @@ load_dotenv()
 DB_DIR = os.getenv("DB_DIR", ".")
 USERS_DB = os.path.join(DB_DIR, "users.db")
 PUBLIC_SUB_URL = os.getenv("PUBLIC_SUB_URL", "").rstrip("/")
+# Домен подписки сам по себе .ru, то есть попадает под geosite:category-ru и без
+# отдельного правила ушёл бы в direct. Для клиента за пределами РФ это значит,
+# что подписка не обновится: местный провайдер перехватит запрос.
+SUB_HOST = urlsplit(PUBLIC_SUB_URL).hostname or ""
 SUB_PORT = int(os.getenv("SUB_PORT", "8080"))
 INTERNAL_PORT = int(os.getenv("INTERNAL_PORT", "8091"))
 
@@ -45,8 +50,12 @@ class XuiNode:
     flow: str
     spider_x: str
     path: str
+    grpc_authority: str
+    grpc_mode: bool
+    server_description: str
     flag: str
     fixed_uuid: str
+    routing: str
 
 
 def _bool_env(name: str, default: bool = False) -> bool:
@@ -97,8 +106,12 @@ def _load_nodes() -> list[XuiNode]:
                 flow=os.getenv(prefix + "FLOW", os.getenv("VPN_FLOW", "xtls-rprx-vision")).strip(),
                 spider_x=os.getenv(prefix + "SPIDER_X", "/").strip(),
                 path=os.getenv(prefix + "PATH", "/").strip(),
+                grpc_authority=os.getenv(prefix + "GRPC_AUTHORITY", "").strip(),
+                grpc_mode=_bool_env(prefix + "GRPC_MODE", False),
+                server_description=os.getenv(prefix + "SERVER_DESCRIPTION", "").strip(),
                 flag=os.getenv(prefix + "FLAG", "").strip(),
                 fixed_uuid=os.getenv(prefix + "FIXED_UUID", "").strip(),
+                routing=os.getenv(prefix + "ROUTING", "").strip().lower(),
             )
         )
     return nodes
@@ -261,7 +274,7 @@ async def _get_crypt5_url(sub_url: str) -> str:
                 if resp.status == 200:
                     data = await resp.json(content_type=None)
                     print(f"[crypt5] API response: {data}")
-                    for field in ("link", "url", "href", "result", "encrypted"):
+                    for field in ("encrypted_link", "link", "url", "href", "result", "encrypted"):
                         link = data.get(field, "")
                         if isinstance(link, str) and link.startswith("happ://"):
                             return link
@@ -446,16 +459,17 @@ def _build_node_link(node: XuiNode, account: dict[str, str]) -> str | None:
     }
     if node.security == "reality":
         short_id = _first_short_id(node.short_id)
-        if not node.public_key or not short_id:
+        if not node.public_key:
             return None
         params.update(
             {
                 "pbk": node.public_key,
                 "fp": node.fingerprint,
                 "sni": node.sni,
-                "sid": short_id,
             }
         )
+        if short_id:
+            params["sid"] = short_id
         if node.flow:
             params["flow"] = node.flow
         if node.network == "tcp" and node.spider_x:
@@ -488,6 +502,18 @@ def _build_node_json_config(node: XuiNode, account: dict[str, str]) -> dict | No
         return None
     short_id = _first_short_id(node.short_id)
     display_name = f"{node.flag} {node.profile_name}" if node.flag else node.profile_name
+    # ru_proxy: российский трафик НЕ уходит в direct, а идёт в туннель — нода
+    # сама разводит его дальше на RU-выход. Для клиента за пределами РФ direct
+    # означает местного провайдера, где рф-сервисы заблокированы.
+    direct_domains = ["geosite:private"]
+    if node.routing != "ru_proxy":
+        direct_domains.append("geosite:category-ru")
+    # Ставится первым, чтобы перебить правило category-ru -> direct ниже.
+    sub_rule = (
+        [{"domain": [f"domain:{SUB_HOST}"], "outboundTag": "proxy", "type": "field"}]
+        if SUB_HOST
+        else []
+    )
     proxy: dict[str, Any] = {
         "protocol": "vless",
         "tag": "proxy",
@@ -501,7 +527,6 @@ def _build_node_json_config(node: XuiNode, account: dict[str, str]) -> dict | No
                             "id": _resolve_uuid(node, account),
                             "flow": node.flow or "",
                             "encryption": "none",
-                            "level": 0,
                         }
                     ],
                 }
@@ -513,13 +538,16 @@ def _build_node_json_config(node: XuiNode, account: dict[str, str]) -> dict | No
         },
     }
     if node.security == "reality":
-        proxy["streamSettings"]["realitySettings"] = {
+        reality_settings: dict[str, Any] = {
             "serverName": node.sni,
             "fingerprint": node.fingerprint or "chrome",
             "publicKey": node.public_key,
-            "shortId": short_id,
-            "spiderX": node.spider_x or "/",
         }
+        if short_id:
+            reality_settings["shortId"] = short_id
+        if node.spider_x:
+            reality_settings["spiderX"] = node.spider_x
+        proxy["streamSettings"]["realitySettings"] = reality_settings
     elif node.security == "tls":
         proxy["streamSettings"]["tlsSettings"] = {
             "serverName": node.sni,
@@ -535,23 +563,25 @@ def _build_node_json_config(node: XuiNode, account: dict[str, str]) -> dict | No
         proxy["streamSettings"]["wsSettings"] = ws
     elif net in ("xhttp", "splithttp"):
         proxy["streamSettings"]["xhttpSettings"] = {"path": node.path or "/"}
+    elif net == "grpc":
+        proxy["streamSettings"]["grpcSettings"] = {
+            "authority": node.grpc_authority,
+            "mode": node.grpc_mode,
+            "serviceName": node.path or "/",
+        }
     return {
         "remarks": display_name,
-        "log": {"loglevel": "warning"},
-        "dns": {
-            "queryStrategy": "UseIP",
-            "servers": ["1.1.1.1", "1.0.0.1", "8.8.8.8"],
-        },
+        "dns": {"servers": ["1.1.1.1", "1.0.0.1"]},
+        "meta": {"serverDescription": node.server_description},
         "inbounds": [
             {
                 "listen": "127.0.0.1",
                 "port": 10808,
                 "protocol": "socks",
-                "settings": {"auth": "noauth", "udp": True},
+                "settings": {"udp": True},
                 "sniffing": {
                     "destOverride": ["http", "tls", "quic"],
                     "enabled": True,
-                    "routeOnly": False,
                 },
                 "tag": "socks",
             },
@@ -559,11 +589,9 @@ def _build_node_json_config(node: XuiNode, account: dict[str, str]) -> dict | No
                 "listen": "127.0.0.1",
                 "port": 10809,
                 "protocol": "http",
-                "settings": {"allowTransparent": False},
                 "sniffing": {
                     "destOverride": ["http", "tls", "quic"],
                     "enabled": True,
-                    "routeOnly": False,
                 },
                 "tag": "http",
             },
@@ -577,7 +605,29 @@ def _build_node_json_config(node: XuiNode, account: dict[str, str]) -> dict | No
             "domainMatcher": "hybrid",
             "domainStrategy": "IPIfNonMatch",
             "rules": [
+                *sub_rule,
+                {
+                    "network": "tcp",
+                    "outboundTag": "direct",
+                    "port": "25,23,119",
+                    "type": "field",
+                },
                 {"outboundTag": "direct", "protocol": ["bittorrent"], "type": "field"},
+                {
+                    "ip": ["geoip:private"],
+                    "outboundTag": "direct",
+                    "type": "field",
+                },
+                {
+                    "domain": direct_domains,
+                    "outboundTag": "direct",
+                    "type": "field",
+                },
+                {
+                    "domain": ["geosite:win-spy", "geosite:category-ads"],
+                    "outboundTag": "block",
+                    "type": "field",
+                },
             ],
         },
     }
@@ -693,8 +743,19 @@ async def handle_redirect(request: web.Request) -> web.Response:
     target = request.query.get("to", "")
     if not target.startswith("happ://"):
         return web.Response(status=400, text="bad redirect")
-    html = f"<script>window.location.href='{target}';</script>"
-    return web.Response(text=html, content_type="text/html")
+    # A 302 lets Android/iOS hand the custom scheme to Happ directly.
+    # Keep a clickable fallback for browsers that refuse custom-scheme redirects.
+    page = (
+        "<!doctype html><meta charset='utf-8'>"
+        f"<meta http-equiv='refresh' content='0;url={html_lib.escape(target, quote=True)}'>"
+        f"<a href='{html_lib.escape(target, quote=True)}'>Открыть в Happ</a>"
+    )
+    return web.Response(
+        status=302,
+        headers={"Location": target},
+        text=page,
+        content_type="text/html",
+    )
 
 
 async def handle_health(_: web.Request) -> web.Response:
